@@ -161,7 +161,9 @@ async function main() {
   // ---- P0-3 的**代码层**断言：不得再产出 `undefined` 属性 ----
   // `restored: payload.restored ?? undefined` 会写出一个值为 undefined 的属性，
   // DSH 出参校验判它"不是无损 JSON"，整个工具调用失败（而文件其实写出来了）。
-  const toolsSource = await readFile(join(ROOT, 'lib', 'tools.js'), 'utf8')
+  // 先归一化行尾：下面的剥注释是按 `\n` 切的，CRLF 检出下每行尾部会剩一个 `\r`，
+  // 使正则失配、整行被当成代码（合成 CRLF 检出的验证抓到过这一处）。
+  const toolsSource = (await readFile(join(ROOT, 'lib', 'tools.js'), 'utf8')).replace(/\r\n/gu, '\n')
   const captureSection = toolsSource.slice(
     toolsSource.indexOf('export function makeCaptureTool'),
     toolsSource.indexOf('export function makeDocsTool'),

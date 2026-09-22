@@ -359,15 +359,24 @@ async function main() {
   // （实测 15,173,555 vs 14,725,671）——于是**新克隆的 Windows 仓库门禁必红**，
   // 而本机工作区因为一直是 LF 所以一直绿。判据要测的是"**内容**被改动"，不是"行尾策略"。
   //
-  // 口径：把"每个 LF 都被扩成 CRLF"当作合法的等价形态；其它任何差异（多一个词、少一段）
-  // 都会让两个候选值都对不上。**这不是放宽到"随便都能过"**：注入一段文字仍会失败。
+  // 口径：把产物按文本读进来、**归一化行尾后按 UTF-8 重新计数**，再与 `meta.json` 的
+  // `normalizedBytes` 比。这样：
+  //   * LF 检出 → 与记录逐字节相等（保持原来的严格性）；
+  //   * CRLF 检出 → 归一化后仍相等（不把行尾策略当成"被外部改动"）；
+  //   * 内容真被改动（多一个词、少一段）→ 两者都不等，**照样红**。
+  // 第一版写成"meta + 自己数的 LF 个数"，那是错的：`(?<!\r)\n` 在 CRLF 文件上只匹配
+  // 段落末尾的 LF（每个 CRLF 前面都是 CR），于是把展开量**严重低估**，CRLF 检出下依然红——
+  // 是"合成 CRLF 检出"那次验证把它抓出来的。
   const normalizedBytes = (await Promise.all(rows.map(async row => (await stat(join(NORMALIZED, ...row.path.split('/')))).size))).reduce((a, b) => a + b, 0)
-  const lfOnly = (await Promise.all(rows.map(async row => (await readFile(join(NORMALIZED, ...row.path.split('/')), 'utf8')).match(/(?<!\r)\n/gu)?.length ?? 0))).reduce((a, b) => a + b, 0)
-  const crlfExpanded = meta.normalizedBytes + lfOnly
+  const normalizedBytesText = (await Promise.all(rows.map(async row => {
+    const text = (await readFile(join(NORMALIZED, ...row.path.split('/')), 'utf8')).replace(/\r\n/gu, '\n')
+    return Buffer.byteLength(text, 'utf8')
+  }))).reduce((a, b) => a + b, 0)
+  const diskIsCrlf = normalizedBytes !== meta.normalizedBytes && normalizedBytesText === meta.normalizedBytes
   check('E1 归一化字节数与 meta.json 记录一致（产物没被外部改动）',
-    normalizedBytes === meta.normalizedBytes || normalizedBytes === crlfExpanded,
+    normalizedBytes === meta.normalizedBytes || normalizedBytesText === meta.normalizedBytes,
     `实测 ${normalizedBytes} vs meta ${meta.normalizedBytes}`
-    + (normalizedBytes === crlfExpanded ? `（= meta + ${lfOnly} 个 CRLF，与 autocrlf 检出等价）` : ''))
+    + (diskIsCrlf ? `（磁盘是 CRLF 检出；按文本计数 = ${normalizedBytesText}，与记录一致）` : ''))
 
   console.log(`\n# 语料 ${sources.length} 个 source / ${normalized.size} 个归一化产物`)
 }
