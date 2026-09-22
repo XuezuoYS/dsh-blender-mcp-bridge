@@ -26,6 +26,10 @@
 
 在本项目根目录创建 `.AGENTS` 文件夹，需自动整理记录重要记忆为 md。
 
+### 类型安全
+
+本项目为全 js 写，但引用 typescript 库进行类型安全校验
+
 ### 注释
 
 JSDoc + `jsconfig.json` 的 `checkJs`（等价于全库 `// @ts-check`）语义；
