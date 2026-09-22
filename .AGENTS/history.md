@@ -32,7 +32,6 @@
   → 教训：**"整文件抑制"常常掩盖的是自己的一处类型声明写松了**，不是工具链的固有限制。
 
 **两条判据教训（都当场踩到）**
-
 1. `probeCapabilities` 的"exec 只读"用例断言 `result.n > 0`，即**活动场景必须非空**。
    空场景下 `{"n":0}` 是**正确答案**却报 FAIL——判据依赖环境，不是实现缺陷。
    复跑时用一个物体播种即为 16/16。
@@ -54,7 +53,7 @@
 结果是读者无法分辨"哪句是必须遵守的契约、哪句是当时的想法、哪句是已经完成的工作"——
 最终出现了「`§16` 声称 8 个模块已完成并端到端实测，而磁盘上什么都没有」这类无法自证的状态。
 
-v3 起三者分离：契约在 `contract.md`，进度在 [`STATUS.md`](../STATUS.md)，决策过程在本文件。
+v3 起三者分离：契约在 `contract.md`，进度在 [`README.md`](README.md)（原根目录 `STATUS.md`，已并入），决策过程在本文件。
 **判据**：一条内容如果改变会导致实现必须改变，它属于 `contract.md`；否则属于本文件。
 
 ---
@@ -76,7 +75,7 @@ v2.0 及更早用 `Qn` 编号记录结论。编号本身已废除，下表是唯
 | Q9 | 是否运行 MCP server | **不运行**（见 §3） | [`#core-decisions`](../docs/contract.md#core-decisions) / I10 |
 | Q10 | 上游 transport 复用 | **作废**：我们用自己的传输层 | [`#transport`](../docs/contract.md#transport) |
 | Q11 | 受控列表实现路径 | **作废**：不再有第二个工具面需要路由 | — |
-| Q12 | 落地顺序 | 先直连骨架 | [`STATUS.md`](../STATUS.md) |
+| Q12 | 落地顺序 | 先直连骨架 | [`README.md`](README.md) |
 | Q13 | 视觉反馈 | 纳入：`blender_mcp_capture` | [`#tools`](../docs/contract.md#tools) |
 | Q14 | 偏好 / add-on 写入口是否纳入 L2 | **已决策：纳入，但收窄为三项**（见 §6） | [`#interception-env-writes`](../docs/contract.md#interception-env-writes) |
 | Q15 | deferred 通道接线 | **已决策：接线，接线后必须先复测**（见 §6） | [`#transport-deferred`](../docs/contract.md#transport-deferred) |
@@ -186,7 +185,7 @@ v0.5 依据单次 `undo()` 的 `poll() failed, context is incorrect` 判定"undo
 实际返回的是**未被包装的原始算子**，即拦截整段失效。
 
 → 沉淀为一条**验收判据**：拦截类测试的通过条件必须是「**被拦的东西确实是我们装的**」，
-而不是「结果看起来对」（[`contract.md#guard-ops-proxy`](../docs/contract.md#guard-ops-proxy)、[`STATUS.md`](../STATUS.md) §4）。
+而不是「结果看起来对」（[`contract.md#guard-ops-proxy`](../docs/contract.md#guard-ops-proxy)、[`README.md`](README.md) §8）。
 
 ### 5.4 三条关于"守卫载体跨 exec 存活"的坑
 
@@ -204,6 +203,25 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 到 HTML 响应，**不依赖 `clientBundle`** 就实现了完整浏览器端 UI。
 
 → "不做设置页"的**正确理由是范围控制与信任边界**，不是"做不到"（[`contract.md#packaging`](../docs/contract.md#packaging)）。
+
+### 5.6 "`INVOKE_DEFAULT` 同步阻塞"被 2026-09-22 报告推翻（**实测**）
+
+`docs/blender-5.2-findings.md §1` 修订前的结论是"`INVOKE_DEFAULT` 在本通道下**同步阻塞**，
+于是 deferred 分支实际不可达，任何 exec 必须控制在 30 s 内"。
+
+**它当时是怎么被验证的**：在同一个 exec 内先读 `bpy.app.is_job_running('RENDER')`、
+再回读产出文件，两次读到的都是"已经结束"。**这个判据区分不了两种机制**——
+同步执行、以及异步但恰好已跑完，都能解释它。
+
+**推翻它的观察**（只有异步才成立）：`render('INVOKE_DEFAULT')` 返回 `RUNNING_MODAL` 且
+`is_job_running('RENDER')` 为真；一次后台渲染在本插件的 exec 返回**之后**写出了
+`C:\tmp\Untitled.png`（72,966 B），而护栏对此完全无感。
+
+**连带结论**：通道里**唯一可靠的出图姿势是 `write_still=True`**（同步 + 直写文件）；
+裸 `render()` 会**静默空转**（返回 `FINISHED`，`Render Result` 为 0×0）。
+→ 已按报告改写 [`blender-5.2-findings.md §1`](../docs/blender-5.2-findings.md)，
+并把"耗时 + 瞬时状态不足以判定同步/异步"写进
+[`ver-dev20260922-regression.md`](ver-dev20260922-regression.md) 的判据纪律。
 
 ---
 
@@ -227,6 +245,10 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 但 §3.1 第 1 条已明确"交互 GUI timer 模式整体未实测"，
 因此**接线后、复测前不得声称可用**。
 → [`contract.md#transport-deferred`](../docs/contract.md#transport-deferred)。
+
+> **2026-09-22 追加**：`INVOKE_DEFAULT` 被实测为**异步**之后，这个键的口径要更保守——
+> 它只是**第二段读窗口**，**不是**"能跑长渲染"的许可。长渲染的可靠姿势仍然是自己
+> `write_still=True` 分片，或交给用户的 F12（见 [`blender-5.2-findings.md §1`](../docs/blender-5.2-findings.md)）。
 
 ---
 
@@ -322,7 +344,7 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 **本仓库**
 
 - [`contract.md`](../docs/contract.md)：契约、规则、不变量
-- [`STATUS.md`](../STATUS.md)：交付与接线状态、待实测项
+- [`README.md`](README.md)：**交付状态 + 工作记忆的单一入口**（交付与接线状态、待实测项、门禁）
 - `docs/architecture.md`：架构导读 + 两个第三方插件的实现方式对比
 - `docs/upstream-facts-tools.md`：上游协议 / 26 个工具契约 / 安全面 / 许可的逐条取证
 - `docs/upstream-facts-docs.md`：上游文档检索层（RST 解析与检索）的逐条取证

@@ -86,7 +86,9 @@ async function main() {
   const pkg = JSON.parse(await readFile(at('package.json'), 'utf8'))
   const patch = await readFile(at('cordis.patch.yml'), 'utf8')
   const readme = await readFile(at('README.md'), 'utf8')
-  const status = await readFile(at('STATUS.md'), 'utf8')
+  // 交付状态与工作记忆的**单一入口**：根目录的 `STATUS.md` 已并入这里（`.AGENTS/README.md`）。
+  // R7 与 R12 都依赖它，因此读不到就是硬失败——入口文件被改名/删掉时不许静默跳过。
+  const status = await readFile(at('.AGENTS', 'README.md'), 'utf8')
   const contract = await readFile(at('docs/contract.md'), 'utf8')
   const entry = await readFile(at('index.js'), 'utf8')
 
@@ -195,9 +197,11 @@ async function main() {
   // **从磁盘枚举**，不写死清单：写死的清单本身就是漂移源——审计时它漏了 docs/contract.md
   // 自己（F11），于是"契约里引用了自己的锚点却不存在"这种情况永远查不出来。
   const refFiles = ['cordis.patch.yml', 'skills/blender-mcp-knowledge/SKILL.md']
+  // 根目录只认**规范类**文档：`STATUS.md` 已并入 `.AGENTS/README.md`，
+  // 若将来又有人在根目录加一份 `*.md`，它不会自动进入受检集合——这正是想要的（白名单，不是通配）。
   for (const dir of ['', 'docs']) {
     for (const name of await readdir(dir === '' ? ROOT : at(dir))) {
-      if (dir === '' && !['README.md', 'AGENTS.md', 'STATUS.md', 'THIRD_PARTY_NOTICES.md'].includes(name)) continue
+      if (dir === '' && !['README.md', 'AGENTS.md', 'THIRD_PARTY_NOTICES.md'].includes(name)) continue
       if (name.endsWith('.md') || name.endsWith('.js')) refFiles.push(dir === '' ? name : `docs/${name}`)
     }
   }
@@ -278,6 +282,13 @@ async function main() {
     falseClaims.length === 0,
     falseClaims.length === 0 ? 'README 只描述已实现的能力（未实现项不出现或明确标注）' : `可疑声明：${falseClaims.join(', ')}`)
 
+  // ---- R7c 交付状态只有**一个**入口（根目录不得再冒出 STATUS.md）----
+  // 两处各写一份状态一定会漂移（本仓已有"两处各写一份必然漂移"的多次教训）。
+  const strayStatus = await exists(at('STATUS.md'))
+  check('R7c 交付状态只有 `.AGENTS/README.md` 一个入口（根目录没有 STATUS.md）',
+    strayStatus === false,
+    strayStatus ? '根目录又出现了 STATUS.md——状态会两处漂移' : '根目录只有 AGENTS.md / README.md / THIRD_PARTY_NOTICES.md 三份规范类文档')
+
   // ---- R8 语料产物齐备且自洽 ----
   const required = ['knowledge/meta.json', 'knowledge/rules.json', 'knowledge/g3-rules.md', 'knowledge/index/files.jsonl', 'knowledge/index/df.json', 'knowledge/index/tokens.json', 'knowledge/index/api-map.jsonl']
   const absent = []
@@ -305,6 +316,57 @@ async function main() {
     sampleOk
       ? `builderVersion=${meta.builderVersion}、builtAt=${meta.builtAt}、normalizedBytes=${normalizedBytes}、indexBytes=${meta.indexBytes}`
       : 'meta.json 缺少 builderVersion 或 normalizedBytes')
+
+  // ---- R10 G3 规则清单不许过期（`buildKnowledge.js` 是唯一真相源）----
+  // 判据是"**源里的规则 id 全部出现在生成物里**"：只查"生成物非空"过不了这一关——
+  // 加了规则却忘了重新 `build` 时，规则本体在源里、生成物里没有，模型读 `rules` 时看不到，
+  // 而那种失败**不报错**（正是本仓 G3 一直在讲的那类静默失败）。
+  const builtRules = JSON.parse(await readFile(at('knowledge/rules.json'), 'utf8'))
+  const builtIds = new Set(/** @type {Array<{id: string}>} */ (builtRules).map(rule => rule.id))
+  const rulesMarkdown = await readFile(at('knowledge/g3-rules.md'), 'utf8')
+  // 从构建脚本的 `own` 数组里抽 id：形如 `['rule-id', '说明…'],`
+  const ownBlock = /const own = \[([\s\S]*?)\n {2}\]/u.exec(await readFile(at('buildKnowledge.js'), 'utf8'))?.[1] ?? ''
+  const ownIds = [...ownBlock.matchAll(/^\s*\['([a-z0-9-]+)',/gmu)].map(match => match[1])
+  const missingFromJson = ownIds.filter(id => !builtIds.has(id))
+  const missingFromMarkdown = ownIds.filter(id => !rulesMarkdown.includes(id))
+  const stale = [...new Set([...missingFromJson, ...missingFromMarkdown])]
+  check('R10 `buildKnowledge.js` 里的每条 G3 规则都已重新 build 进生成物',
+    ownIds.length > 0 && stale.length === 0,
+    stale.length === 0
+      ? `源 ${ownIds.length} 条 + 上游原文 1 条 = rules.json ${builtRules.length} 条；逐条都在 g3-rules.md 里`
+      : `源里有、生成物里没有（忘了 build？）：${stale.join(', ')}`)
+
+  // ---- R11 报告清单的覆盖锚点必须在用例里存在 ----
+  // `20260922` 实机报告（临时文档，已删除；结论见 `.AGENTS/ver-dev20260922-regression.md`）的 §7 清单
+  // 是本轮修复的输入。逐条修完必须**有人守**：
+  // 失去守卫的修复会在下一次重构里悄悄消失，而"当时修好了"不留任何痕迹。
+  // 判据用的是**用例名里真实出现的标签**（P0-1 / P0-2 / …），不是"文档里提到了"。
+  const regression = await readFile(at('test/regression.test.js'), 'utf8')
+  const requiredTags = [
+    'P0-1', // io.open 未包裹
+    'P0-2', // rename 族目标实参不校验
+    'P0-3', // capture 返回 undefined 属性
+    'P0-4', // 文件输出算子不在名单内
+    'P1-2', // 检查点粒度
+  ]
+  const unguarded = requiredTags.filter(tag => !new RegExp(`check\\('[^']*${tag}`, 'u').test(regression))
+  check('R11 报告 §7 的 P0/P1 条目在 `test/regression.test.js` 里都有具名用例',
+    unguarded.length === 0,
+    unguarded.length === 0
+      ? `${requiredTags.length} 个标签都有具名用例：${requiredTags.join(', ')}`
+      : `没有对应用例的条目：${unguarded.join(', ')}`)
+
+  // ---- R12 提示词段落与技能都必须存在（I26 / I27 的交付面）----
+  // `handoffHint` 在 `lib/tools.js`（工具实现层），不在注册点——所以两个文件都要查。
+  const toolsSource = await readFile(at('lib/tools.js'), 'utf8')
+  const hygiene = entry.includes('blender-mcp-bridge-scene-hygiene-policy')
+  const handoff = toolsSource.includes('handoffHint')
+  const checklist = toolsSource.includes('sessionChecklist')
+  const skillRegistered = entry.includes('ctx.skills')
+  check('R12 场景整洁段落（I27）与完成态交接（I26）以及运行时技能都在交付面里',
+    hygiene && handoff && checklist && skillRegistered,
+    `systemPrompt 段落=${hygiene}；exec.handoffHint=${handoff}；`
+    + `status.sessionChecklist=${checklist}；技能注册=${skillRegistered}`)
 }
 
 await main()
