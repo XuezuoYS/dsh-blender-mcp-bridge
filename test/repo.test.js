@@ -104,14 +104,25 @@ async function main() {
       : `不存在的项：${missingEntries.join(', ')}`)
 
   // ---- R2 配置三方一致 ----
+  /**
+   * 统一行尾再解析。
+   *
+   * **实测（本仓一次真实缺陷）**：`core.autocrlf=true`（Git for Windows 的默认值）下
+   * Git 会把 `cordis.patch.yml` 检出成 CRLF，而下面几个判据里的 `/config:\n/`、
+   * `/^ {8}(\w+):/gmu` 假定 `\n`——于是**新克隆的 Windows 仓库门禁必红**，
+   * 而本机工作区因为文件一直是 LF 所以一直绿。判据必须对行尾不敏感。
+   */
+  const normalizeEol = (/** @type {string} */ text) => text.replace(/\r\n/gu, '\n')
+
   /** 从 schema 文本里抽顶层键（含子域）。 */
   const schemaKeys = new Set()
-  const schemaBlock = /export const Config = Schema\.object\(\{([\s\S]*?)\n\}\)/u.exec(entry)?.[1] ?? ''
+  const schemaBlock = /export const Config = Schema\.object\(\{([\s\S]*?)\n\}\)/u.exec(normalizeEol(entry))?.[1] ?? ''
   for (const match of schemaBlock.matchAll(/^ {2}(\w+): Schema\./gmu)) schemaKeys.add(match[1])
   for (const match of schemaBlock.matchAll(/^ {4}(\w+): Schema\./gmu)) schemaKeys.add(`<sub>.${match[1]}`)
 
+  const patchText = normalizeEol(patch)
   const patchKeys = new Set()
-  const patchBlock = /config:\n([\s\S]*)$/u.exec(patch)?.[1] ?? ''
+  const patchBlock = /config:\n([\s\S]*)$/u.exec(patchText)?.[1] ?? ''
   for (const match of patchBlock.matchAll(/^ {8}(\w+):/gmu)) patchKeys.add(match[1])
   for (const match of patchBlock.matchAll(/^ {10}(\w+):/gmu)) patchKeys.add(`<sub>.${match[1]}`)
 
@@ -141,7 +152,7 @@ async function main() {
   const resurrected = []
   for (const key of banned) {
     const leaf = key.split('.')[1]
-    if (new RegExp(`^\\s{10}${leaf}:`, 'mu').test(patch)) resurrected.push(`cordis.patch.yml: ${key}`)
+    if (new RegExp(`^\\s{10}${leaf}:`, 'mu').test(patchText)) resurrected.push(`cordis.patch.yml: ${key}`)
   }
   check('R2c 已删除的配置键没有复活（I21：知识库不是可开关的）',
     resurrected.length === 0,
@@ -158,7 +169,7 @@ async function main() {
   const sourceFiles = ['lib/tools.js', 'lib/diagnostics.js', 'lib/protocol.js', 'lib/checkpoint.js',
     'lib/guardPayload.js', 'lib/requestPolicy.js', 'lib/taskDir.js', 'lib/slug.js',
     'lib/knowledge.js', 'lib/settingsGuard.js', 'index.js', 'buildKnowledge.js']
-  const allCode = (await Promise.all(sourceFiles.map(async path => stripComments(await readFile(at(path), 'utf8'))))).join('\n')
+  const allCode = (await Promise.all(sourceFiles.map(async path => stripComments(normalizeEol(await readFile(at(path), 'utf8')))))).join('\n')
   /** 叶子键（点号全路径），来自 schema 的两层嵌套结构。 */
   const leafKeys = new Set()
   for (const match of schemaBlock.matchAll(/^ {2}(\w+): Schema\./gmu)) leafKeys.add(match[1])

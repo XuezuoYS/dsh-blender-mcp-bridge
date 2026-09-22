@@ -1,0 +1,20 @@
+# 行尾一律 LF。
+#
+# **为什么需要这个文件**（本仓一次真实缺陷）：本机 `core.autocrlf=true`（Git for Windows 的默认值）
+# 下，Git 会把文本文件检出成 CRLF。于是：
+#   * `cordis.patch.yml` 变成 CRLF，而 `test/repo.test.js` 的 R2a 判据里写着 `/config:\n/` →
+#     **新克隆的 Windows 仓库门禁必红**，而本机工作区因为文件一直是 LF 所以一直绿；
+#   * `knowledge/normalized/**` 的磁盘字节数比 `meta.json` 记录的 LF 版多出一个 CRLF 量
+#     （实测 15,173,555 vs 14,725,671），`test/corpus.test.js` 的 E1 同样必红。
+#
+# 修法是两层，缺一不可：
+#   1. **本文件**：让**新的**检出确定性地是 LF（否则每个人拿到的语料字节数都不一样）；
+#   2. **判据本身对行尾不敏感**（R2a/R2c/R3 先归一化行尾，E1 接受"meta + CRLF 展开"这一等价形态）——
+#      因为 `.gitattributes` 只影响**重新检出**，已经被检出的文件不会因此改变。
+# 判据只对行尾敏感、对内容不敏感，那是"永远可能红"的门禁，比没有门禁更糟。
+#
+# 不改二进制产物（.blend / .png）——它们本来就不该被行尾转换。
+* text=auto eol=lf
+*.png binary
+*.blend binary
+*.jsonl text eol=lf

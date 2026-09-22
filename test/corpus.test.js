@@ -354,10 +354,20 @@ async function main() {
       : `凭空出现的名字：${fabricated.join(', ')}`)
 
   // ---- 体积一致性 ----
+  // **行尾不敏感**（本仓一次真实缺陷）：`core.autocrlf=true`（Git for Windows 默认值）下
+  // Git 会把文本文件检出成 CRLF，磁盘字节数比 `meta.json` 记录的 LF 版**多出一个 CRLF 量**
+  // （实测 15,173,555 vs 14,725,671）——于是**新克隆的 Windows 仓库门禁必红**，
+  // 而本机工作区因为一直是 LF 所以一直绿。判据要测的是"**内容**被改动"，不是"行尾策略"。
+  //
+  // 口径：把"每个 LF 都被扩成 CRLF"当作合法的等价形态；其它任何差异（多一个词、少一段）
+  // 都会让两个候选值都对不上。**这不是放宽到"随便都能过"**：注入一段文字仍会失败。
   const normalizedBytes = (await Promise.all(rows.map(async row => (await stat(join(NORMALIZED, ...row.path.split('/')))).size))).reduce((a, b) => a + b, 0)
+  const lfOnly = (await Promise.all(rows.map(async row => (await readFile(join(NORMALIZED, ...row.path.split('/')), 'utf8')).match(/(?<!\r)\n/gu)?.length ?? 0))).reduce((a, b) => a + b, 0)
+  const crlfExpanded = meta.normalizedBytes + lfOnly
   check('E1 归一化字节数与 meta.json 记录一致（产物没被外部改动）',
-    normalizedBytes === meta.normalizedBytes,
-    `实测 ${normalizedBytes} vs meta ${meta.normalizedBytes}`)
+    normalizedBytes === meta.normalizedBytes || normalizedBytes === crlfExpanded,
+    `实测 ${normalizedBytes} vs meta ${meta.normalizedBytes}`
+    + (normalizedBytes === crlfExpanded ? `（= meta + ${lfOnly} 个 CRLF，与 autocrlf 检出等价）` : ''))
 
   console.log(`\n# 语料 ${sources.length} 个 source / ${normalized.size} 个归一化产物`)
 }

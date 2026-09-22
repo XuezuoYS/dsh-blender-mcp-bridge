@@ -168,9 +168,13 @@ async function main() {
   )
   // 必须**剥掉注释**再断言：修复说明本身就写着 `payload.restored ?? undefined`（旧写法），
   // 直接全文匹配会把"解释 bug 的注释"当成 bug 本身——本仓已有一次同族教训（R3 的注释假绿）。
+  //
+  // ⚠️ 这里第一版只剥了"` // …`"（`//` 前有空格）的行内注释，**漏掉了以空白开头、`//` 在行首**的
+  // 整行注释——而工具层里的整行注释正是缩进过的，于是假红（报告里那两条 `?? undefined`
+  // 都在注释里）。判据要同时认三种形态：行首 `//`、缩进后的 `//`、以及行尾的 `//`。
   const captureCode = captureSection
     .split('\n')
-    .map(line => line.replace(/\s\/\/.*$/u, ''))
+    .map(line => line.replace(/^\s*\/\/.*$/u, '').replace(/\s\/\/.*$/u, ''))
     .join('\n')
   const undefinedProps = captureCode.match(/\?\?\s*undefined/gu) ?? []
   check('P0-3 `capture` 的**代码**里不再有 `?? undefined`',
