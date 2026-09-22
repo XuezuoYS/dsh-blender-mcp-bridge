@@ -11,6 +11,7 @@
 
 import { readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -35,7 +36,12 @@ import {
 /** 插件名（与 cordis.patch.yml 的 id 对齐）。 */
 export const name = 'blender-mcp-bridge'
 
-/** 依赖的工具注册表服务。 */
+/**
+ * 依赖的工具注册表服务。
+ *
+ * `skills` 是**可选**的：缺该服务时技能只留在包里可被直读，不阻断插件加载
+ * （与 `systemPrompt` 同一策略）。
+ */
 export const inject = ['tools', 'systemPrompt']
 
 /**
@@ -98,9 +104,16 @@ export const Config = Schema.object({
   checkpoint: Schema.object({
     enabled: Schema.boolean().default(true),
     keep: Schema.number().min(1).max(20).default(3),
-    /** 单份体积上限（字节）；0 表示不限。超限只告警，不硬失败（docs/contract.md#checkpoint）。 */
+    /** 单份体积上限（字节）；0 表示不限。超限的旧份会在轮换时**优先被回收**（docs/contract.md#checkpoint）。 */
     maxBytes: Schema.number().min(0).default(0),
-  }).default({ enabled: true, keep: 3, maxBytes: 0 }),
+    /**
+     * 检查点粒度。
+     * - `turn`（默认）：一轮一份 `turn-{T}.blend`，回滚是整文件级的；
+     * - `write`：每次 `mutating:true` 的写各落一份 `turn-{T}-{seq}.blend`，误删可回到更近的位置，
+     *   代价是占盘与 `keep` 份数消耗都变多。
+     */
+    perTurn: Schema.union(['turn', 'write']).default('turn'),
+  }).default({ enabled: true, keep: 3, maxBytes: 0, perTurn: 'turn' }),
 
   // ---- 拦截层 ----
   intercept: Schema.object({
@@ -152,7 +165,7 @@ export const Config = Schema.object({
  * @property {string} requireVersionMin
  * @property {string} taskRoot
  * @property {'workspace'|'blendFile'} taskRootMode
- * @property {{enabled: boolean, keep: number, maxBytes: number}} checkpoint
+ * @property {{enabled: boolean, keep: number, maxBytes: number, perTurn: 'turn'|'write'}} checkpoint
  * @property {{enabled: boolean, guardThreadScope: 'main'|'all'}} intercept
  * @property {{maxHits: number, maxCharsPerHit: number}} knowledge
  * @property {{status: boolean, exec: boolean, inspect: boolean, capture: boolean, snapshot: boolean, docs: boolean}} expose
@@ -169,6 +182,13 @@ export const Config = Schema.object({
  * @property {{section?: (options: {name: string, order: number, text: string}) => (() => void)}} [systemPrompt]
  *   系统提示词服务；缺失时提示词不注册（不阻断插件加载）。
  * @property {(event: string, listener: (...args: any[]) => void) => void} on 事件订阅。
+ * @property {{register: (skill: {
+ *   name: string, description: string, whenToUse?: string, content: string, path?: string,
+ *   source: string, resourceBase?: {kind: 'directory', path: string},
+ *   invocation?: {modelInvocable: boolean, userInvocable: boolean},
+ * }) => (() => void)}} [skills]
+ *   DSH 技能注册表（`@deepseek-ai/dsh-skill` 的 `SkillRegistry`）。**可选**：
+ *   缺它时技能只留在包里、可被人工直读，插件照常加载。
  */
 
 /**
@@ -319,6 +339,63 @@ export function apply(ctx, config) {
     '> 都能绕过护栏。真正不可逆的操作先问用户。',
   ].join('\n')
 
+  /**
+   * 提示词段落：**AI 要有意识地做组织与命名**（I27）。
+   *
+   * 起因（2026-09-22 报告 §4）：把"干净"完全定义成**作用域干净**（不越界写、不动出图设置、
+   * 不覆盖保存）之后，模型可见文本里**一句**关于命名 / 集合分层 / 布线 / 灯光秩序的话都没有。
+   * 实测里 137 个对象、18 个集合、全套 `STR_`/`FURN_`/`PLANT_` 前缀命名，**全是测试者自己
+   * 带进来的习惯**，插件从头到尾没要求过一次。这是产品定位缺口，不是实现 bug——所以补一段文本。
+   *
+   * 写法上的两条取舍：
+   * 1. **不规定美学**（不指定配色、风格、块面比例），只规定**可检验的组织性**——
+   *    分层、命名、面类型、成组。后者才是"整洁"，前者是艺术决策，不该由插件定。
+   * 2. **给出可自检的判据**（"空集合要删掉""可见几何四边面优先"），
+   *    因为无法自检的约定等于没有约定。
+   */
+  const SCENE_HYGIENE_POLICY = [
+    '## 场景整洁约定：组织与命名是你的一部分工作',
+    '',
+    '你在用户的工作文件里建东西。**"能渲染出来"不等于干完了**——一个 137 个对象全塞在',
+    '`Collection` 里、名字是 `Cube.042` 的场景，用户接手时得先花半小时整理，那等于你没干完。',
+    '',
+    '### 1. 集合分层',
+    '',
+    '按**用途**分组并嵌套，例如 `STR_`（结构）/ `FURN_`（家具）/ `PLANT_`（植物）/ `ASSET_`（散布资产）',
+    '/ `LIGHT_`（灯光）/ `ATMO_`（体积与大气）/ `RIG_`（骨骼与骨架）/ `CAM_`（相机）/ `REF_`（参考板）。',
+    '每个对象**只属于一个**集合。**不要留空集合**——建了又不用就删掉。',
+    '',
+    '### 2. 命名：`<类别>_<角色>_<序号>`',
+    '',
+    '例：`STR_Column_L_02`、`FURN_Shelf_Bay_R_04`、`PLANT_Bonsai_Branch_B3`。',
+    '**序号从 01 起两位补零**（排序稳定）。不要留 `Cube.042` / `Circle.017` 这类默认名。',
+    '材质、节点组、动作、骨骼同样要有可读名字（`MAT_Brass_Aged`、`GN_Foliage_Bonsai`、`ANIM_Bonsai_Sway`）。',
+    '',
+    '> 注意：名字是**给人看的**，不是身份。判定归属仍必须用 `as_pointer()`（见 G3 的 name-is-not-identity）。',
+    '',
+    '### 3. 布线：可见几何**四边面优先**',
+    '',
+    '- 可见的面用**四边形**（bmesh 生成、`mesh.validate()` 过一遍）；',
+    '- **三角形只允许**留在隐藏的分布体 / 实例化源上（它们不直接进画面）；',
+    '- **n-gon 只允许**出现在不可见的封盖上，且应在交付说明里点出来；',
+    '- 重叠面 / 孤立点 / 孤立边属于缺陷，建完自己清一遍。',
+    '',
+    '### 4. 灯光与体积的秩序',
+    '',
+    '- 所有灯**都进集合**、都有统一命名，不要有游离在顶层的灯；',
+    '- 体积域（雾 / 光柱）各自成组，**先渲染并看图**确认它们的边界没有露在画面里——',
+    '  体积域的前脸在镜头里会变成一条硬邦邦的分界线，这个错误**只有看图才能发现**；',
+    '- 散布类（`Instance on Points`）记得用 `GeometryNodeSetMaterial` 指定材质：',
+    '  实例默认继承**资产卡片自己的**材质，发射器上的材质槽会被无视。',
+    '',
+    '### 5. 收尾自检（做完之前过一遍）',
+    '',
+    '- 集合里有没有空壳？对象有没有游离在顶层？名字有没有默认后缀（`.001` / `.042`）？',
+    '- 可见几何的三角面/n-gon 是不是都在隐藏体上？',
+    '- 改了东西之后**渲染一次并看图**——"看起来对了、其实错了"的 bug（材质、雾域边界）',
+    '  只有看图能发现。出图请用 `bpy.ops.render.render(write_still=True)`，然后让用户看，或自行确认。',
+  ].join('\n')
+
   /** @type {Array<() => void>} */
   const disposers = []
   // 绑定 this：`section` 是服务对象上的方法，脱开对象调用会丢掉上下文
@@ -334,7 +411,16 @@ export function apply(ctx, config) {
       order: 900,
       text: SETTINGS_POLICY,
     }))
+    disposers.push(registerSection({
+      name: 'blender-mcp-bridge-scene-hygiene-policy',
+      order: 895,
+      text: SCENE_HYGIENE_POLICY,
+    }))
   }
+
+  // 技能注册（I26/I27 之外的**消费入口**）：见 registerKnowledgeSkill 的说明。
+  const disposeSkill = registerKnowledgeSkill(ctx)
+  if (disposeSkill !== undefined) disposers.push(disposeSkill)
 
   // 轮次边界订阅：turn/start 只标记本轮开始，不立刻产生检查点（docs/contract.md#checkpoint）。
   // 第一个参数是 Session 对象（`session.id`），不是 id 字符串。
@@ -513,6 +599,7 @@ export function apply(ctx, config) {
         enabled: config.checkpoint.enabled,
         keep: config.checkpoint.keep,
         maxBytes: config.checkpoint.maxBytes,
+        perTurn: config.checkpoint.perTurn,
       })
       managers.set(key, manager)
     }
@@ -533,11 +620,14 @@ export function apply(ctx, config) {
       enabled: config.checkpoint.enabled,
       keep: config.checkpoint.keep,
       maxBytes: config.checkpoint.maxBytes,
+      perTurn: config.checkpoint.perTurn,
     })
     return (await manager.list()).map(record => ({
       name: record.name,
       path: record.path,
       relative: displayPath(task.workspace, record.path),
+      turn: record.turn,
+      seq: record.seq,
       bytes: record.bytes,
       mtimeMs: record.mtimeMs,
       ageDays: Number(((Date.now() - record.mtimeMs) / 86_400_000).toFixed(2)),
@@ -547,15 +637,22 @@ export function apply(ctx, config) {
   /**
    * 本轮是否已落检查点。
    *
+   * **内存登记 ∪ 磁盘**：此前只看内存里的 `registeredTurns`，而那个集合只在**本进程落过**检查点时才
+   * 有内容——于是"任务目录里明明有 `turn-0.blend`，`roundHasCheckpoint` 却报 false"
+   * （2026-09-22 报告 P1-3 的实测形态）。磁盘是更诚实的来源：快照真的在，就该报 true。
+   *
    * @param {string} sessionId 会话 id。
    * @param {import('./lib/taskDir.js').TaskDir | undefined} task 任务目录。
    * @param {number} turn 轮次。
-   * @returns {boolean} 是否已落。
+   * @returns {Promise<boolean>} 是否已落。
    */
-  const roundHasCheckpoint = (sessionId, task, turn) => {
+  const roundHasCheckpoint = async (sessionId, task, turn) => {
     if (task === undefined) return false
     const manager = managers.get(`${sessionId}\0${task.root}`)
-    return manager === undefined ? false : manager.hasCheckpoint(turn)
+    if (manager !== undefined && manager.hasCheckpoint(turn)) return true
+    // 磁盘兜底：不依赖内存登记，也不新建管理器（只读路径不写盘）
+    const listed = await listCheckpoints(task)
+    return listed.some(item => item.turn === turn)
   }
 
   /** @type {import('./lib/tools.js').ToolContext} */
@@ -601,6 +698,91 @@ function defaultTaskName(exec) {
   // 保留完整可读 id（只剥掉不适合做目录名的字符）；截断交给 slug 的长度上限处理
   const short = id.replace(/[^A-Za-z0-9_-]/gu, '').slice(0, 40)
   return short === '' ? 'task' : `session-${short}`
+}
+
+/**
+ * 把随包的 `skills/blender-mcp-knowledge/SKILL.md` 注册为**运行时技能**。
+ *
+ * **为什么必须真的注册**（2026-09-22 报告 P1-9）：此前 `skills/` 只是包内的一个普通目录，
+ * 插件只注册工具与提示词，于是会话技能目录里**看不到这个技能**——它只能被"模型碰巧去读到文件"
+ * 才起作用，等于把"什么时候该查 API"这条消费入口寄托在运气上。
+ *
+ * 取舍：
+ * - **`SKILL.md` 仍是真身来源**：不把正文复制进代码，免得两处漂移；注册时读盘。
+ * - **缺 `skills` 服务时不阻断**：那份文件依旧在包里，可以直接读；插件照常加载。
+ * - **读盘失败也不阻断**：技能是增强，不是加载前提。
+ *
+ * @param {AppContext} ctx 插件上下文。
+ * @returns {(() => void) | undefined} disposer；未注册时 undefined。
+ */
+function registerKnowledgeSkill(ctx) {
+  const register = ctx.skills?.register?.bind(ctx.skills)
+  if (register === undefined) return undefined
+  const skillPath = new URL('./skills/blender-mcp-knowledge/SKILL.md', import.meta.url)
+  /** @type {string} */
+  let raw
+  try {
+    raw = readFileSync(skillPath, 'utf8')
+  } catch (error) {
+    console.warn(`[blender-mcp-bridge] 技能正文读不到，跳过注册：${/** @type {Error} */ (error).message}`)
+    return undefined
+  }
+  const parsed = parseSkillFrontmatter(raw)
+  try {
+    return register({
+      name: parsed.name ?? 'blender-mcp-knowledge',
+      description: parsed.description ?? 'Offline Blender Python knowledge base lookup contract.',
+      ...parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse },
+      content: parsed.body,
+      path: fileURLToPath(skillPath),
+      source: 'runtime',
+      resourceBase: {
+        kind: 'directory',
+        path: dirname(fileURLToPath(skillPath)),
+      },
+      invocation: { modelInvocable: true, userInvocable: true },
+    })
+  } catch (error) {
+    console.warn(`[blender-mcp-bridge] 技能注册失败（不影响工具面）：${/** @type {Error} */ (error).message}`)
+    return undefined
+  }
+}
+
+/**
+ * 解析 SKILL.md 的 YAML frontmatter（**够用即可**：只认 `key: value` 单行标量）。
+ *
+ * 不引 YAML 库：这里的 frontmatter 只有 `name` / `description`（可能折行）三种形态，
+ * 而多一个依赖就多一处版本要跟。认不出来时返回空对象，由调用方用默认值兜底。
+ *
+ * @param {string} raw 文件原文。
+ * @returns {{name?: string, description?: string, whenToUse?: string, body: string}} 解析结果。
+ */
+function parseSkillFrontmatter(raw) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u.exec(raw)
+  if (match === null) return { body: raw.trim() }
+  /** @type {Record<string, string>} */
+  const fields = {}
+  /** @type {string|undefined} */
+  let pendingKey
+  for (const line of (match[1] ?? '').split(/\r?\n/u)) {
+    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/u.exec(line)
+    if (kv !== null) {
+      const key = /** @type {string} */ (kv[1])
+      // `kebab-case` 的 frontmatter 键与 JS 里的 camelCase 字段一一对应
+      pendingKey = key === 'when-to-use' || key === 'whenToUse' ? 'whenToUse' : key
+      fields[pendingKey] = (kv[2] ?? '').trim()
+      continue
+    }
+    if (pendingKey !== undefined && /^\s+\S/u.test(line)) {
+      fields[pendingKey] = `${fields[pendingKey] ?? ''} ${line.trim()}`.trim()
+    }
+  }
+  return {
+    ...fields.name === undefined ? {} : { name: fields.name },
+    ...fields.description === undefined ? {} : { description: fields.description },
+    ...fields.whenToUse === undefined ? {} : { whenToUse: fields.whenToUse },
+    body: raw.slice(match[0].length).trim(),
+  }
 }
 
 /**
@@ -660,8 +842,11 @@ function makeStatusDefinition(context) {
     'blender_mcp_status',
     'Read-only handshake with the Blender MCP add-on: connection diagnostics, version gate, and the risk posture of the open scene '
       + '(file path, save status, age, available checkpoints, scene size, whether this round already has a checkpoint, and the evidence for choosing a rollback source). '
+      + 'Also reports the closing checklist (`sessionChecklist`): the plugin never overwrite-saves your .blend, so the result tells the model what still needs the user. '
       + 'Call this before any write so you know how much is at stake. Never creates a task directory.',
-    {},
+    {
+      task: { type: 'string', description: 'Optional task directory name; use it to inspect the checkpoints of a task created under a non-default name (defaults to a stable per-session name).' },
+    },
     makeStatusTool(context),
     true,
   )
