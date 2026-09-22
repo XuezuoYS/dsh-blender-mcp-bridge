@@ -72,21 +72,21 @@
 
 ---
 
-## 4. 任务目录位置：`taskRootMode` 的三条分支
+## 4. 任务目录位置：`taskRootMode` 的两个取值
 
 | 检查 | 结果 |
 |---|---|
+| `blendFile`（**默认**）：任务目录在活动 `.blend` 旁边 | ✅ `<blendDir>\.dsh-blender-*` |
 | `workspace`：任务目录在会话 workspace 下 | ✅ |
-| `blendFile`：任务目录在活动 `.blend` 旁边 | ✅ `<blendDir>\.dsh-blender-*` |
-| `blendFile` 与 `workspace` 落在不同目录 | ✅ |
+| 两个取值落在不同目录 | ✅ |
 | 显式 `taskRoot` 覆盖 `taskRootMode` | ✅ |
 | 活动工程未保存（无路径） | 回退 workspace 并 `console.warn` **说明原因**，不静默 |
 
-**⚠️ 这改变了信任边界**：它仍符合 I5（可写范围只有那一个任务目录），
-但**任务目录的位置跟着工程文件走**，等于允许写工程文件所在目录下的一个子目录。
-不接受这个取舍就用默认的 `workspace`。**这不是安全边界，只防误操作**（I10）。
+**⚠️ 这决定了信任边界的位置**：它仍符合 I5（可写范围只有那一个任务目录），
+但默认值下**任务目录的位置跟着工程文件走**，等于允许写工程文件所在目录下的一个子目录。
+要解耦就用 `taskRootMode: workspace`。**这不是安全边界，只防误操作**（I10）。
 
-**连带实测**：切到 `blendFile` 后，原先硬编码工作区路径的脚本立刻被护栏拒绝：
+**连带实测**：两个取值之间切换时，原先硬编码另一侧路径的脚本会立刻被护栏拒绝：
 `write-outside-scope: <workspace>\…\renders | writable scope: <blendDir>\…`
 ——护栏在正确跟随新边界。
 

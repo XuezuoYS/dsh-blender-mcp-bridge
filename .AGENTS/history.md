@@ -1,9 +1,50 @@
 # 决策记录
 
-> 本文件是**历史坐标**，不是规范。**任何仍然生效的规则都在 [`contract.md`](contract.md)**；
+> 本文件是**历史坐标**，不是规范。**任何仍然生效的规则都在 [`docs/contract.md`](../docs/contract.md)**；
 > 本文只回答"当时为什么这么定、后来为什么改、以及哪些旧结论已被证伪"。
 >
 > 读法：每一条旧结论后面都标了它**沉淀成了哪条规则**。若只想知道规则，不必读本文。
+>
+> 📦 位置：dev 周期由 `docs/HISTORY.md` 迁入 `.AGENTS/history.md`（`docs/` 只留契约与取证文档）。
+
+---
+
+## 0. dev 周期：按新版 AGENTS.md 的结构重组
+
+**目标**：把实现对齐重写后的 `AGENTS.md`（基础安全三条 / 类型安全 / 注释风格 / 工作记忆）。
+
+**落地的结构性变更**
+
+| 变更 | 说明 |
+|---|---|
+| 工作目录默认位置 | `taskRootMode` 默认由 `workspace` 改为 **`blendFile`**（活动 `.blend` 所在目录下）。只读路径一起修：`taskRootOf(exec, blendDir)` 用握手已拿到的工程路径，**不额外发请求** |
+| 目录可见性 | 新增 `lib/taskDir.js#listTaskDirs` 与 `status.existingTaskDirs`（**只读**，绝不创建目录）；提示词新增 `blender-mcp-bridge-taskdir-policy` 段落 |
+| 类型安全 | `index.js` 去掉整文件 `@ts-nocheck`，`jsconfig.json` 纳入 `index.js` 与 `test/**`；新增 `pnpm check` |
+| 测试拆分 | `diagnostics/checkRepo.js` → `test/repo.test.js`、`diagnostics/auditCorpus.js` → `test/corpus.test.js`（`node:test`）；`diagnostics/` 只留需实机 Blender 的探针且**整体不入库** |
+| 工作记忆 | `docs/HISTORY.md` 与 `docs/design-review-v0.5.md` 迁入 `.AGENTS/`（内容原样保留，只修链接深度） |
+
+**被证伪的旧结论（重要）**
+
+- 旧 `index.js` 头部写着「`defineTool({...})` 的调用点在 `checkJs` 下**必然**报错，唯一解法是 `as const`」。
+  **这条是错的。** `defineTool` 的签名是 `defineTool<const S extends ParameterSchemaSpec, const O extends ValueSchemaSpec>`，
+  而真正会失败的是中间那层 `toolDefinition()` 把 `parameters` 声明成了 `Record<string, object>`（放宽成 `string`）。
+  把它改回 `ParameterSchemaSpec` 后，对象字面量靠**上下文类型**保留字面量，`index.js` 直接通过检查（`pnpm check` 0 诊断）。
+  → 教训：**"整文件抑制"常常掩盖的是自己的一处类型声明写松了**，不是工具链的固有限制。
+
+**两条判据教训（都当场踩到）**
+
+1. `probeCapabilities` 的"exec 只读"用例断言 `result.n > 0`，即**活动场景必须非空**。
+   空场景下 `{"n":0}` 是**正确答案**却报 FAIL——判据依赖环境，不是实现缺陷。
+   复跑时用一个物体播种即为 16/16。
+2. `probeFindings` 的"死导出黑名单"把**新加的** `listTaskDirs` 判为死导出。
+   改黑名单时必须同时加**正向断言**（"新导出确实有消费者"），
+   否则只是把死导出从黑名单挪进了白名单，门禁看着变绿而判据已失效。
+
+**本轮实测**：`pnpm check` 0 诊断；`pnpm test` 28/28；
+实机 `probeEndToEnd` 30/30、`probeTaskRoot` 4/4、`probeGuard` 18/18、`probeTransport` 14/14、
+`probeSettingsGuard` 11/11、`probeFindings` 42/42、`probeCapabilities` 15/16（空场景，见上）。
+默认落点实测：`exec(mutating)` 的检查点落在 `<活动 .blend 所在目录>/.dsh-blender-{task}/`，
+`status` 只读调用**没有**创建任何目录。
 
 ---
 
@@ -24,28 +65,28 @@ v2.0 及更早用 `Qn` 编号记录结论。编号本身已废除，下表是唯
 
 | Qn | 议题 | 结论 | 现行落点 |
 |---|---|---|---|
-| Q1 | 「一轮」定义 | 一次用户请求 = 一个 `turn` | [`contract.md#checkpoint`](contract.md#checkpoint) |
+| Q1 | 「一轮」定义 | 一次用户请求 = 一个 `turn` | [`contract.md#checkpoint`](../docs/contract.md#checkpoint) |
 | Q2 | 检查点体积上限 | 可配；超限**只告警不失败** | 同上 |
-| Q3 | 设置页面 | 不做（理由已更正，见 §5） | [`#packaging`](contract.md#packaging) |
-| Q4 | 越界写的边界 | 可写范围**只有任务目录**；拒绝时带接管提示 | [`#handoff`](contract.md#handoff) |
-| Q5 | 检查点写盘失败 | **硬失败**，不得"无备份继续" | [`#checkpoint`](contract.md#checkpoint) / I1 |
-| Q6 | 回滚入口 | **不加工具**：agent 用 `exec` 调 `open_mainfile`，插件只给证据 | [`#checkpoint`](contract.md#checkpoint) / I9 |
-| Q7 | undo 集成 | 纳入：写前 `undo_push`，回滚优先 undo、检查点兜底 | [`#checkpoint`](contract.md#checkpoint) |
-| Q8 | 交付形态 | 纯 JS + TS 仅做类型检查 | [`#packaging`](contract.md#packaging) |
-| Q9 | 是否运行 MCP server | **不运行**（见 §3） | [`#core-decisions`](contract.md#core-decisions) / I10 |
-| Q10 | 上游 transport 复用 | **作废**：我们用自己的传输层 | [`#transport`](contract.md#transport) |
+| Q3 | 设置页面 | 不做（理由已更正，见 §5） | [`#packaging`](../docs/contract.md#packaging) |
+| Q4 | 越界写的边界 | 可写范围**只有任务目录**；拒绝时带接管提示 | [`#handoff`](../docs/contract.md#handoff) |
+| Q5 | 检查点写盘失败 | **硬失败**，不得"无备份继续" | [`#checkpoint`](../docs/contract.md#checkpoint) / I1 |
+| Q6 | 回滚入口 | **不加工具**：agent 用 `exec` 调 `open_mainfile`，插件只给证据 | [`#checkpoint`](../docs/contract.md#checkpoint) / I9 |
+| Q7 | undo 集成 | 纳入：写前 `undo_push`，回滚优先 undo、检查点兜底 | [`#checkpoint`](../docs/contract.md#checkpoint) |
+| Q8 | 交付形态 | 纯 JS + TS 仅做类型检查 | [`#packaging`](../docs/contract.md#packaging) |
+| Q9 | 是否运行 MCP server | **不运行**（见 §3） | [`#core-decisions`](../docs/contract.md#core-decisions) / I10 |
+| Q10 | 上游 transport 复用 | **作废**：我们用自己的传输层 | [`#transport`](../docs/contract.md#transport) |
 | Q11 | 受控列表实现路径 | **作废**：不再有第二个工具面需要路由 | — |
 | Q12 | 落地顺序 | 先直连骨架 | [`STATUS.md`](../STATUS.md) |
-| Q13 | 视觉反馈 | 纳入：`blender_mcp_capture` | [`#tools`](contract.md#tools) |
-| Q14 | 偏好 / add-on 写入口是否纳入 L2 | **已决策：纳入，但收窄为三项**（见 §6） | [`#interception-env-writes`](contract.md#interception-env-writes) |
-| Q15 | deferred 通道接线 | **已决策：接线，接线后必须先复测**（见 §6） | [`#transport-deferred`](contract.md#transport-deferred) |
-| Q16 | 设置形态 | 本机配置文件；不做任何 HTML / 前端 | [`#packaging`](contract.md#packaging) |
-| Q17 | 知识库方向 | **翻转 v1.0**：内嵌官方语料（不运行 server） | [`#knowledge`](contract.md#knowledge) |
-| Q18 | 官方 Python 模板路由 | 只取接口形状与语义，在自有通道重写 | [`#knowledge`](contract.md#knowledge) / I18 |
-| Q19 | 许可 | `GPL-3.0-or-later` | [`#licensing`](contract.md#licensing) |
-| Q20 | 知识库检索粒度 | 分 G1 契约 / G2 语义 / G3 规则 | [`#knowledge-granularity`](contract.md#knowledge-granularity) |
-| Q21 | 语料是否含完整 RST 原文 | 包含，但不参与默认检索 | [`#knowledge-corpus`](contract.md#knowledge-corpus) |
-| Q22 | 语料版本漂移 | 不硬阻塞但**必须可见** | [`#discovery-drift`](contract.md#discovery-drift) / I11 |
+| Q13 | 视觉反馈 | 纳入：`blender_mcp_capture` | [`#tools`](../docs/contract.md#tools) |
+| Q14 | 偏好 / add-on 写入口是否纳入 L2 | **已决策：纳入，但收窄为三项**（见 §6） | [`#interception-env-writes`](../docs/contract.md#interception-env-writes) |
+| Q15 | deferred 通道接线 | **已决策：接线，接线后必须先复测**（见 §6） | [`#transport-deferred`](../docs/contract.md#transport-deferred) |
+| Q16 | 设置形态 | 本机配置文件；不做任何 HTML / 前端 | [`#packaging`](../docs/contract.md#packaging) |
+| Q17 | 知识库方向 | **翻转 v1.0**：内嵌官方语料（不运行 server） | [`#knowledge`](../docs/contract.md#knowledge) |
+| Q18 | 官方 Python 模板路由 | 只取接口形状与语义，在自有通道重写 | [`#knowledge`](../docs/contract.md#knowledge) / I18 |
+| Q19 | 许可 | `GPL-3.0-or-later` | [`#licensing`](../docs/contract.md#licensing) |
+| Q20 | 知识库检索粒度 | 分 G1 契约 / G2 语义 / G3 规则 | [`#knowledge-granularity`](../docs/contract.md#knowledge-granularity) |
+| Q21 | 语料是否含完整 RST 原文 | 包含，但不参与默认检索 | [`#knowledge-corpus`](../docs/contract.md#knowledge-corpus) |
+| Q22 | 语料版本漂移 | 不硬阻塞但**必须可见** | [`#discovery-drift`](../docs/contract.md#discovery-drift) / I11 |
 
 **Q10 / Q11 作废的处置**：两者都是"要复用上游 MCP server 的传输与工具面"这一前提下的问题。
 Q9 定为"不运行 server"后，前提消失，问题随之失去对象。ID **不再复用**。
@@ -83,7 +124,7 @@ v1.0 曾在 `package.json` 的 `files` 里列入**不存在的** `LICENSE` 与 `
 但它们是**有章节支撑的既定交付物**，性质与"臆测一个 CHANGELOG"不同。
 
 **沉淀出的规则**：`files` 里每一列出的路径都必须存在；
-**不允许提前声明尚未实现的交付物**（[`#licensing`](contract.md#licensing)）。
+**不允许提前声明尚未实现的交付物**（[`#licensing`](../docs/contract.md#licensing)）。
 
 ---
 
@@ -100,7 +141,7 @@ v1.0 曾在 `package.json` 的 `files` 里列入**不存在的** `LICENSE` 与 `
 | 后果 | 它在**每次 exec 结束时**还原成自己的版本 → 我们在 exec 内打的补丁**活不过一次请求**；而且因为返回的是未包装算子，检查点自己的 `save_as_mainfile(copy=True)` 会被误判为"已放行" |
 | 附带脆弱性 | `bpy.ops.wm` 的属性访问有缓存（`delattr` 后重新访问才会经过创建函数） |
 
-→ 沉淀为 [`contract.md#guard-ops-proxy`](contract.md#guard-ops-proxy) 与 I16。
+→ 沉淀为 [`contract.md#guard-ops-proxy`](../docs/contract.md#guard-ops-proxy) 与 I16。
 
 **历史脚本的处置**：`guard_probe.py` 当年基于 `_op_create_function` 得出的"算子拦截可行"结论**已被证伪**，
 不要再当依据。事故现场脚本（`guard_probe.py` / `recover_probe.py` / `restore_probe.py` / `verify_restore.py` / `inspect_blend.py`）
@@ -134,7 +175,7 @@ v0.5 依据单次 `undo()` 的 `poll() failed, context is incorrect` 判定"undo
 → 现在的 I3：**检查点文件是唯一可靠的回滚来源**，undo 至多是一条需要自证安全的加速路径，
 且当前证明不了，故不得自动采用；不可判定性由 `riskPosture.undoPrecheck`
 （`measurable: false` + `userEditsIndeterminate: true`）摊给调用方决定
-（[`contract.md#checkpoint-undo`](contract.md#checkpoint-undo)）。
+（[`contract.md#checkpoint-undo`](../docs/contract.md#checkpoint-undo)）。
 
 **教训**：修好一个"不可用"的误判之后，紧接着给出的替代排序**同样是假设**，
 也得实测。5.2 那次纠错只验证了 undo **能调通**，没有验证它**够不够安全地被优先采用**。
@@ -145,7 +186,7 @@ v0.5 依据单次 `undo()` 的 `poll() failed, context is incorrect` 判定"undo
 实际返回的是**未被包装的原始算子**，即拦截整段失效。
 
 → 沉淀为一条**验收判据**：拦截类测试的通过条件必须是「**被拦的东西确实是我们装的**」，
-而不是「结果看起来对」（[`contract.md#guard-ops-proxy`](contract.md#guard-ops-proxy)、[`STATUS.md`](../STATUS.md) §4）。
+而不是「结果看起来对」（[`contract.md#guard-ops-proxy`](../docs/contract.md#guard-ops-proxy)、[`STATUS.md`](../STATUS.md) §4）。
 
 ### 5.4 三条关于"守卫载体跨 exec 存活"的坑
 
@@ -153,7 +194,7 @@ v0.5 依据单次 `undo()` 的 `poll() failed, context is incorrect` 判定"undo
 重装导致守卫嵌套（新根放行、旧根拒绝）、`allowRoot` 变化未触发重装（闭包捕获了旧根）、
 证据跨 exec 累积（只读 exec 返回 `status: blocked`）。
 
-→ 沉淀为 [`contract.md#guard-carrier`](contract.md#guard-carrier) 的三个修复与
+→ 沉淀为 [`contract.md#guard-carrier`](../docs/contract.md#guard-carrier) 的三个修复与
 「`tampered` 必须靠证据、不能靠推断」这条判据。
 
 ### 5.5 "设置卡片做不到"的旧论证不准确
@@ -162,7 +203,7 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 **前置事实成立但结论不准确**：第三方插件 `dsh-whale-widget` 用 `ctx.webServer.register` + 注入 `<script>`
 到 HTML 响应，**不依赖 `clientBundle`** 就实现了完整浏览器端 UI。
 
-→ "不做设置页"的**正确理由是范围控制与信任边界**，不是"做不到"（[`contract.md#packaging`](contract.md#packaging)）。
+→ "不做设置页"的**正确理由是范围控制与信任边界**，不是"做不到"（[`contract.md#packaging`](../docs/contract.md#packaging)）。
 
 ---
 
@@ -176,7 +217,7 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 **一条只在 L1 存在的规则等于没有规则**。但也不能承诺"接管所有 preferences 写"——那无法验证。
 
 **决策**：纳入 L2，但**范围严格收窄为三项**（偏好写入口、`addon_utils` 启停、脚本自动执行开关）。
-→ [`contract.md#interception-env-writes`](contract.md#interception-env-writes)。
+→ [`contract.md#interception-env-writes`](../docs/contract.md#interception-env-writes)。
 
 ### 6.2 Q15：deferred 通道接线
 
@@ -185,7 +226,7 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 **决策**：**接线**，因为它与 I12（不允许死配置）冲突——留一个读了不用的键比不做更糟。
 但 §3.1 第 1 条已明确"交互 GUI timer 模式整体未实测"，
 因此**接线后、复测前不得声称可用**。
-→ [`contract.md#transport-deferred`](contract.md#transport-deferred)。
+→ [`contract.md#transport-deferred`](../docs/contract.md#transport-deferred)。
 
 ---
 
@@ -243,7 +284,7 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 |---|---|---|---|
 | 早期 | tag `v1.0.3` | tag `v1.0.3` 自带 | 该 tag 的语料是 Blender **5.1** |
 | v2.0 | tag `v1.0.3` | `main` HEAD | `main` 与 `v1.0.3` 的 `data/**` 差异巨大（新增 278 / 删除 48 / 变更 2280 文件） |
-| **v3** | tag `v1.0.3` | **固定 commit sha** | 见 [`contract.md#knowledge-fingerprint`](contract.md#knowledge-fingerprint) |
+| **v3** | tag `v1.0.3` | **固定 commit sha** | 见 [`contract.md#knowledge-fingerprint`](../docs/contract.md#knowledge-fingerprint) |
 
 **两点必须记住**：
 
@@ -280,10 +321,11 @@ v0.8 曾写"设置卡片需要的 `clientBundle` 预设未公开，工作量不�
 
 **本仓库**
 
-- [`contract.md`](../contract.md)：契约、规则、不变量
+- [`contract.md`](../docs/contract.md)：契约、规则、不变量
 - [`STATUS.md`](../STATUS.md)：交付与接线状态、待实测项
 - `docs/architecture.md`：架构导读 + 两个第三方插件的实现方式对比
 - `docs/upstream-facts-tools.md`：上游协议 / 26 个工具契约 / 安全面 / 许可的逐条取证
 - `docs/upstream-facts-docs.md`：上游文档检索层（RST 解析与检索）的逐条取证
-- `docs/design-review-v0.5.md`：v0.5 的逐条可执行性核查（**其中的多数结论已被证伪或推翻，见 §5**）
-- `diagnostics/`：取证脚本（非交付物）
+- [`.AGENTS/design-review-v0.5.md`](design-review-v0.5.md)：v0.5 的逐条可执行性核查（**其中的多数结论已被证伪或推翻，见 §5**）
+- `diagnostics/`：**临时探针**（需要实机 Blender，不入库）
+- `test/`：入库门禁（`pnpm test`：仓库一致性 + 全语料审计）

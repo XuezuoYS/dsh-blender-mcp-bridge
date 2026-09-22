@@ -13,13 +13,17 @@
 | 类别 | 文件 | 是否交付 | 说明 |
 |---|---|---|---|
 | **插件本体** | `index.js`、`lib/*.js`（10 个）、`package.json`、`cordis.patch.yml`、`README.md`、`jsconfig.json`、`skills/`、`knowledge/` | ✅ **是** | 纯 JS、零运行时依赖、无构建步骤 |
-| **契约与文档** | `docs/contract.md`、`docs/blender-5.2-findings.md`、`STATUS.md`、`docs/HISTORY.md`、`AGENTS.md` | ❌ | 契约、实测发现、交付状态、决策记录 |
-| **诊断探针** | `diagnostics/*.js`（7 个） | ❌ | 设计期/实现期取证脚本，可复跑 |
+| **契约与文档** | `docs/contract.md`、`docs/blender-5.2-findings.md`、`STATUS.md`、`AGENTS.md` | ❌ | 契约、实测发现、交付状态、行为准则 |
+| **工作记忆** | `.AGENTS/*.md`（5 个） | ❌ | 迁入的红线、决策史、被证伪的旧结论、验证门禁 |
+| **入库门禁** | `test/*.test.js`（2 个） | ❌ | 离线可跑：仓库一致性 + 全语料审计 |
+| **临时探针** | `diagnostics/*.js`（8 个） | ❌ | 需实机 Blender，`.gitignore` 整体忽略 |
 
-**没有 TypeScript 源码**：JS 文件全部手写，TypeScript 只以 `tsc --noEmit` 形式做类型检查（`jsconfig.json`）。
+**没有 TypeScript 源码**：JS 文件全部手写，TypeScript 只以 `tsc --noEmit` 形式做类型检查（`jsconfig.json`），
+覆盖 `index.js`、`lib/**`、`buildKnowledge.js` 与 `test/**`（`pnpm check`）。
 
 **已清理**：事故现场脚本、旧天一阁/明潮场景的构建脚本与一次性诊断、以及场景专用的 `probeScene.js`
-（它硬编码已删场景的 `TY_` 前缀，且自身会改用户渲染设置）均已删除；`diagnostics/` 从 67 个文件收敛到 7 个。
+（它硬编码已删场景的 `TY_` 前缀，且自身会改用户渲染设置）均已删除；
+`diagnostics/` 只留需要实机 Blender 的探针，纯离线的完整性校验已迁入 `test/`。
 
 ---
 
@@ -71,11 +75,11 @@
 | `protocol.js` | 帧编解码、持续 drain、三类超时 | `sendExecute`、`asExecEnvelope` |
 | `diagnostics.js` | 指纹握手、扩展清单解析、分级诊断（`contract.md#discovery-diagnostics`） | `diagnose`、`handshake` |
 | `slug.js` | 任务名 slug 化（纯函数） | `slugifyTaskName`、`suffixedTaskName` |
-| `taskDir.js` | 任务目录建立/复用、属主标记、界内判定 | `ensureTaskDir`、`findExistingTaskDir`、`isInsideTask` |
+| `taskDir.js` | 任务目录建立/复用、属主标记、界内判定、同级目录列举 | `ensureTaskDir`、`findExistingTaskDir`、`listTaskDirs`、`isInsideTask` |
 | `requestPolicy.js` | **L1** 静态判定 | `scanRequest` |
 | `guardPayload.js` | **L2** 运行时护栏的 Python 载荷生成 | `wrapWithGuard` |
 | `checkpoint.js` | 轮换计划、落盘、回滚来源选择 | `CheckpointManager`、`planRotation`、`pickRestoreSource` |
-| `tools.js` | 工具的实现与结果规范化（v1.0 起 5 个：status / exec / inspect / capture / snapshot） | `make*Tool`、`sessionIdOf`、`workspaceOf` |
+| `tools.js` | 工具的实现与结果规范化（6 个：status / exec / inspect / capture / snapshot / docs） | `make*Tool`、`sessionIdOf`、`workspaceOf` |
 
 `lib/` **不反向依赖 `index.js`**：`ToolContext` 的 `config` 在 `tools.js` 里按结构化类型声明，避免入口一变、lib 类型跟着碎。
 
@@ -123,7 +127,7 @@ diagnose()
 
 ```
 1. ensureTask(exec, args.task)
-     workspace = config.taskRoot || 会话 cwd
+     父目录 = config.taskRoot || （默认）活动 .blend 所在目录 || 会话 cwd（工程未保存时的回退）
      → slugifyTaskName → 逐个候选名尝试
         不存在            → 建目录 + 5 个子目录 + 写 .dsh-blender-task.json（属主标记）
         已存在且有标记     → 复用
@@ -189,7 +193,7 @@ diagnose()
 
 ## 7. 已删除的事故现场脚本与一条历史偏差
 
-仓库里曾有 5 个根目录 `.py`，它们是 2026-09-16 那次「探测脚本删掉整个资产」事故（见 `docs/HISTORY.md#7-事故复盘2026-09-16`）的现场工具，
+仓库里曾有 5 个根目录 `.py`，它们是 2026-09-16 那次「探测脚本删掉整个资产」事故（见 [`../.AGENTS/history.md`](../.AGENTS/history.md) 的事故复盘）的现场工具，
 **不是插件代码**、也不在 `package.json` 的 `files` 里。按「保持仓库干净」的要求现已删除：
 
 | 曾有的文件 | 用途 |
@@ -328,20 +332,19 @@ const tag = '<script defer src="/dsh-whale/widget.js"></script>'
 ## 10. 怎么自己验证
 
 ```sh
-# 类型检查
-pnpm typecheck
-
-# 不需要 Blender 的两项（随时可跑）
-node diagnostics/checkRepo.js        # 仓库一致性 13 项：配置三方一致、锚点可解析、SPDX、语料产物齐备
-node diagnostics/auditCorpus.js      # 全语料审计 15 项
+# 类型检查 + 离线门禁（不需要 Blender）
+pnpm check                            # tsc --noEmit：index.js + lib/** + buildKnowledge.js + test/**
+pnpm test                             # node:test：仓库一致性 13 项 + 全语料审计 15 项
 
 # 需要「开着 add-on 的 Blender 会话」（没有会自动 SKIP 并说明，退出码 0）
+# ⚠️ 这些探针**不入库**（.gitignore 忽略整个 diagnostics/），只在本地开发时可用
+node diagnostics/probePreflight.js    # 可用性预检（其余探针都先走它）
 node diagnostics/probeEndToEnd.js     # 真的注册工具并逐个调用（30 项）
 node diagnostics/probeFindings.js     # 审计发现的逐条回归（41 项，含"探针不留场景残留"）
 node diagnostics/probeGuard.js        # L2 机制层（18 项，含蓄意篡改）
-node diagnostics/probeCapabilities.js # 工具面压测（16 项，含故意越界以验证拦截）
+node diagnostics/probeCapabilities.js # 工具面压测（16 项，含故意越界以验证拦截；空场景下"exec 只读"会误报）
 node diagnostics/probeSettingsGuard.js# 设置漂移检测 + 提示词段落（11 项）
-node diagnostics/probeTaskRoot.js     # taskRootMode 三条分支（3–4 项：工程未保存时少一条）
+node diagnostics/probeTaskRoot.js     # taskRootMode 两个取值（4 项：工程未保存时少一条）
 node diagnostics/probeTransport.js    # 帧格式与超时（14 项）
 
 # Node 侧工具链自检

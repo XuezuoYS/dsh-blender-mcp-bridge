@@ -85,8 +85,10 @@ DSH  ⇐ 本插件  ⇐ TCP socket ⇒  Blender Add-on
 
 - L2 只检**主线程**（可配置）；补丁窗口是**同步 exec 期间**，窗口外的异步/延迟写不受约束。
 - `importlib.reload`、ctypes 直调 C、动态构造路径都能绕过 L2（L1 也解析不出来）。**「未命中」不等于安全。**
-- 可写范围**只有任务目录**；默认是 `<workspace>/.dsh-blender-{task}/`，
-  可用 `taskRootMode: blendFile` 改成**活动 `.blend` 文件旁边的子目录**（⚠️ 那会把这条边界跟着工程文件走）。
+- 可写范围**只有任务目录**；默认是**活动 `.blend` 文件所在目录**下的 `.dsh-blender-{task}/`
+  （AGENTS.md 基础安全需要第 2 条）。可用 `taskRootMode: workspace` 改用会话工作区，
+  或用 `taskRoot` 指定一个固定的父目录。⚠️ 任务目录的位置**就是**这条边界的位置——
+  它在工程目录下时意味着"允许写工程目录下的一个子目录"。**这不是安全边界，只防误操作。**
   越界写/删会被拒绝并返回 `suggested_path` 与接管说明——这一步需要**用户**自己在 Blender 或系统里完成。
 - 覆盖保存（`wm.save_mainfile`、`wm.save_as_mainfile` 不带 `copy=True`）一律拒绝；存盘走 `blender_mcp_snapshot`。
 - **偏好 / add-on 开关 / 脚本自动执行**的写入口属于 L2 拦截范围（三项，可枚举）。
@@ -179,8 +181,8 @@ dsh plugin --profile web add ./dsh-blender-mcp-bridge
         requireVersionMin: '5.1'
         # ---- 任务目录 ----
         taskRoot: ''
-        # workspace = 会话工作区；blendFile = 活动 .blend 文件旁边的子目录
-        taskRootMode: workspace
+        # blendFile（默认）= 活动 .blend 文件所在目录下的子目录；workspace = 会话工作区
+        taskRootMode: blendFile
         # ---- 检查点 ----
         checkpoint:
           enabled: true
@@ -222,7 +224,7 @@ dsh plugin --profile web add ./dsh-blender-mcp-bridge
 | `rejectForeignPeer` | `true` | 布尔 | 端口被别的服务占用时是否拒绝继续（**不建议关**） | ✅ |
 | `requireVersionMin` | `'5.1'` | 语义版本串 | add-on 要求的最低 Blender 版本 | ✅ |
 | `taskRoot` | `''` | 绝对路径 | 留空 = 按 `taskRootMode` 决定；想统一放到某个盘时设它（优先级最高） | ✅ |
-| `taskRootMode` | `'workspace'` | `workspace` \| `blendFile` | 任务目录放哪。`blendFile` = **活动 .blend 文件旁边**，产出与工程在一起（⚠️ 见下方说明） | ✅ |
+| `taskRootMode` | `'blendFile'` | `blendFile` \| `workspace` | 任务目录放哪。`blendFile`（默认）= **活动 `.blend` 文件所在目录下**，产出与工程在一起；`workspace` = 会话工作区（⚠️ 见下方说明） | ✅ |
 | `checkpoint.enabled` | `true` | 布尔 | 关掉就没有"写前备份"（**不建议**） | ✅ |
 | `checkpoint.keep` | `3` | 1–20 | 保留几轮备份；大场景吃磁盘时调小 | ✅ |
 | `checkpoint.maxBytes` | `0` | ≥0 字节 | `0` = 不限；设了会在超限时**只告警**（不中断） | ✅ |
@@ -266,21 +268,20 @@ Blender → 编辑 → 偏好设置 → 插件 → MCP → Port
 
 之后所有产出落在 `D:/blender-tasks/.dsh-blender-{task}/`。
 
-**3. 让产出跟在工程文件旁边**
+**3. 改用会话工作区**（默认是"跟着工程文件走"）
 
 ```yaml
-        taskRootMode: blendFile
+        taskRootMode: workspace
 ```
 
-之后任务目录是 `<活动 .blend 所在目录>/.dsh-blender-{task}/`，产出与工程放在一起，
-不用再去 DSH 工作空间里找。
+之后任务目录是 `<会话工作区>/.dsh-blender-{task}/`，与工程文件解耦。
 
-> ⚠️ **这会把任务目录（因此也把护栏的可写范围边界）挪到工程文件所在目录下。**
-> 可写范围**仍然只有那一个任务目录**，位置却跟着工程走。
-> 这不是安全边界，只防误操作；不接受这个取舍就用默认的 `workspace`。
+> ⚠️ **任务目录的位置就是护栏可写范围边界的位置。** 可写范围**仍然只有那一个任务目录**，
+> 但它的位置决定"允许在哪个目录下写"：默认跟着工程文件走（等价于允许写工程目录下的一个子目录）。
+> 这不是安全边界，只防误操作。
 >
-> 两条边界行为值得知道：**活动工程还没保存过时**（没有文件路径）会回退到工作空间
-> 并打一条 `console.warn` 说明，不会静默写到别处；**换了模式之后**，之前按旧位置
+> 两条边界行为值得知道：**活动工程还没保存过时**（没有文件路径）会回退到会话工作区
+> 并打一条 `console.warn` 说明，不会静默写到别处；**换了位置之后**，之前按旧位置
 > 硬编码路径的脚本会被护栏拒绝（`write-outside-scope`）——那是护栏在跟随新边界，属正常。
 
 **4. 关掉检查点**（场景极大、磁盘紧张时；会失去"写前备份"）
@@ -402,15 +403,16 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 ## 开发
 
 ```sh
-pnpm typecheck     # tsc --noEmit；需要本地 node_modules 里有 DSH 类型
+pnpm check         # tsc --noEmit -p jsconfig.json；需要本地 node_modules 里有 DSH 类型
+pnpm test          # node:test：仓库一致性（13 项）+ 全语料审计（15 项），离线可跑
 ```
 
-**类型检查范围**：`lib/**/*.js` 与根目录 `buildKnowledge.js`（真正的逻辑）。入口 `index.js` 的 `defineTool({...})`
-调用点**无法通过严格类型检查**——它要求 `type: 'string'` 这类字面量类型，而纯 JS 对象字面量会放宽成 `string`，
-唯一解法 `as const` 是 TS 语法。工具注册点靠**运行期**验证：
-`diagnostics/probeEndToEnd.js` 会真的注册工具并逐个调用（用例清单见 [`STATUS.md`](STATUS.md)）。
+**类型检查范围**：`index.js`、`lib/**/*.js`、`buildKnowledge.js`、`test/**/*.js`。
+工具参数 schema 的**字面量类型**靠**上下文类型**保留（`toolDefinition()` 的 `parameters` 声明为
+`ParameterSchemaSpec`），所以入口不再需要整文件 `@ts-nocheck`；注册点另有运行期结构断言。
 
-`diagnostics/` 下的探针是设计期/实现期取证脚本，**不属于交付物**。
+`diagnostics/` 下的探针需要**实机 Blender**、且**不入库**（`.gitignore` 忽略整个目录）：
+它们是设计期/实现期取证脚本，不属于交付物。离线门禁在 `test/`。
 
 ## 文档
 
@@ -419,11 +421,12 @@ pnpm typecheck     # tsc --noEmit；需要本地 node_modules 里有 DSH 类型
 | [`docs/contract.md`](docs/contract.md) | **契约、规则、不变量（I1–I25）的唯一权威来源** |
 | [`STATUS.md`](STATUS.md) | 交付与配置接线状态、实测门禁结果、**仍未验证**的项 |
 | [`docs/blender-5.2-findings.md`](docs/blender-5.2-findings.md) | **Blender 5.2 实测发现**：合成器/渲染 API 差异、deferred 不可达、Cycles 与体积雾 |
-| [`docs/HISTORY.md`](docs/HISTORY.md) | 决策记录、被证伪的旧结论、事故复盘 |
 | [`docs/architecture.md`](docs/architecture.md) | 架构与运行逻辑导读 + 生态里其它第三方插件的实现方式调研 |
 | [`docs/upstream-facts-tools.md`](docs/upstream-facts-tools.md) | 上游协议 / 工具契约 / 安全面 / 许可的逐条取证 |
 | [`docs/upstream-facts-docs.md`](docs/upstream-facts-docs.md) | 上游文档检索层（RST 解析与索引）的逐条取证 |
-| [`AGENTS.md`](AGENTS.md) | AI 行为准则（编码红线、命名、注释、工具使用）——**不是**设计文档 |
+| [`.AGENTS/`](.AGENTS/README.md) | **工作记忆**：迁入的红线、决策史、被证伪的旧结论、验证门禁 |
+| [`test/`](test/repo.test.js) | 离线门禁：仓库一致性 + 全语料审计（`pnpm test`） |
+| [`AGENTS.md`](AGENTS.md) | AI 行为准则（基础安全需要、类型安全、注释风格、git 约束） |
 
 **引用约定**：外部文档引用 [`docs/contract.md`](docs/contract.md) 一律用锚点（如 [`#guard-ops-proxy`](docs/contract.md#guard-ops-proxy)）
 或不变量 ID（`I16`），不写裸章节号。参见 [`docs/contract.md#appendix-refs`](docs/contract.md#appendix-refs)。

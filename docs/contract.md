@@ -13,12 +13,12 @@
 > | **本文件** | 契约、规则、不变量、验收判据 | 实现进度、历史决策过程、逐条取证记录 |
 > | [`../README.md`](../README.md) | 用户可见的说明、安装、配置、排错 | 规则推导过程 |
 > | [`../STATUS.md`](../STATUS.md) | 交付清单、配置接线状态、待实测项 | 任何契约 |
-> | [`HISTORY.md`](HISTORY.md) | 决策记录：被证伪的旧结论、被推翻的论证、事故复盘 | 任何仍然生效的规则 |
+> | [`../.AGENTS/README.md`](../.AGENTS/README.md) | 工作记忆：迁入的红线、决策史、被证伪的旧结论、验证门禁 | 任何仍然生效的规则 |
 > | [`architecture.md`](architecture.md) | 仓库结构、模块分层、运行路径（导读） | 规则本身 |
 > | [`upstream-facts-tools.md`](upstream-facts-tools.md) | 上游协议 / 工具契约 / 安全面 / 许可的逐条取证 | 本项目自己的规则 |
 > | [`upstream-facts-docs.md`](upstream-facts-docs.md) | 上游文档检索层（RST 解析与检索）的逐条取证 | 同上 |
 > | [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) | 上游语料的署名、许可与修改声明 | 设计理由 |
-> | [`../AGENTS.md`](../AGENTS.md) | AI 行为准则（命名、注释、编码红线） | 项目定位与设计理由 |
+> | [`../AGENTS.md`](../AGENTS.md) | AI 行为准则（基础安全需要、类型安全、注释风格、git 约束、许可与 SPDX） | 项目定位与设计理由 |
 >
 > **引用约定**：本文件内部可以用章节号；**外部文件一律引用锚点**（`contract.md#transport`、`#invariants`）
 > 或直接引用不变量 ID（`I1`–`I25`），不得引用裸章节号。章节号允许随版本变化，**锚点与不变量 ID 不变**。
@@ -478,7 +478,8 @@ undo 至多是一条需要自证安全的加速路径。）
 
 ### 7.3 可写范围的唯一边界
 
-可写范围**只有任务目录** `<workspace>/.dsh-blender-{task}/` 及其派生路径；任务目录之外一律拒绝。
+可写范围**只有任务目录**（默认 `<活动 .blend 所在目录>/.dsh-blender-{task}/`，见 [#taskdir](#taskdir)）
+及其派生路径；任务目录之外一律拒绝。
 **报告、渲染、截图、导出等全部产物都落在任务目录内**（I5 / I19）。
 
 判定一律用 **`realpath` 解析后的真实目标**，防符号链接逃逸；相对路径按**连接时记录的 Blender 进程 cwd**
@@ -671,7 +672,7 @@ ctx.on('session/event', (session, event) => {
 
 ### 10.4 实现
 
-- 路径：`<workspace>/.dsh-blender-{task}/checkpoints/turn-{T}.blend`
+- 路径：`<任务目录>/checkpoints/turn-{T}.blend`（任务目录默认在活动 `.blend` 所在目录下，见 [#taskdir](#taskdir)）
 - 调用：`bpy.ops.wm.save_as_mainfile(filepath=…, copy=True)`——`copy=True` **不改动会话当前文件路径**（**实测**）。
 - **轮换删除只针对「本插件登记过的、且属于本会话的」检查点**（**I1**：保护集合为空则硬中止）。
   多会话并发时，检查点文件名必须带**会话稳定标识**，禁止用名字判定归属（I2）。
@@ -1050,7 +1051,8 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 | `maxResponseChars` | `200000` | 截断 |
 | `rejectForeignPeer` | `true` | 诊断第 3 级 |
 | `requireVersionMin` | `'5.1'` | 版本门控 |
-| `taskRoot` | `''`（空 = 会话 workspace） | 任务目录 |
+| `taskRoot` | `''`（空 = 按 `taskRootMode` 决定） | 任务目录 |
+| `taskRootMode` | `'blendFile'` | 任务目录（`blendFile` = 活动 `.blend` 同级；`workspace` = 会话工作区） |
 | `checkpoint.enabled` / `.keep` / `.maxBytes` | `true` / `3` / `0` | 检查点 |
 | `intercept.enabled` / `.guardThreadScope` | `true` / `'main'` | 护栏 |
 | `knowledge.maxHits` | `8` | 知识库（1–50） |
@@ -1070,19 +1072,23 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 
 ### 14.4 工作目录约定 <a id="taskdir"></a>
 
-在会话 workspace 下创建 **`.dsh-blender-{task}`**，**任务名由 AI 创建目录时自动生成**：
+在**活动 `.blend` 文件所在目录**下创建 **`.dsh-blender-{task}`**，**任务名由 AI 创建目录时自动生成**：
 
 ```
-<workspace>/.dsh-blender-{task}/
+<blendDir>/.dsh-blender-{task}/
 ├── checkpoints/   renders/   exports/   reports/   logs/
 └── .dsh-blender-task.json   # 属主标记
 ```
+
+父目录的优先级：显式 `taskRoot` > `taskRootMode`（默认 `blendFile` = 活动 `.blend` 同级；
+`workspace` = 会话工作区）。活动工程尚未保存过（没有文件路径）时回退 workspace 并 `console.warn` 说明。
 
 | 规则 | 内容 |
 |---|---|
 | slug 化 | 保留中英文与数字；剥离路径分隔符、控制字符、Windows 保留名（`CON`/`NUL`/`AUX`…）与结尾点号空格；上限 48 字符；为空回退 `task` |
 | 已存在且无属主标记 | 视为**他人数据**，**拒绝复用**，追加 `-2` / `-3` |
 | 强制落点 | 所有输出路径由插件派生。理由不只是防误伤——**实测 Blender 进程 cwd 在 `Program Files` 下，相对路径根本落不到 workspace** |
+| 目录可见性 | `status.existingTaskDirs` **只读**列出同级既有 `.dsh-blender-*`（名 + 最后修改时间）；目录过多时由 AI 询问用户是否清理，**删除始终由用户自己做**（[#tools](#tools)） |
 | 生命周期 | 任务目录**不自动删除** |
 | 只读工具 | **不得创建任务目录**（I14）：找不到既有任务目录时返回 `taskRoot: null` |
 
@@ -1119,19 +1125,21 @@ dsh-blender-mcp-bridge/
 ├── knowledge/             # 语料 + 归一化 + 索引 + meta.json（§12.1）
 ├── jsconfig.json          # checkJs + strict：类型检查用，不产出构建产物
 ├── STATUS.md / AGENTS.md / README.md
-├── docs/                  # 契约、取证记录与决策记录（非交付物）
-└── diagnostics/           # 取证脚本（非交付物）
+├── .AGENTS/               # 工作记忆（非交付物）：红线、决策史、验证门禁
+├── test/                  # 入库门禁（非交付物）：仓库一致性 + 全语料审计，离线可跑
+├── docs/                  # 契约与取证记录（非交付物）
+└── diagnostics/           # 临时探针（非交付物，**不入库**）
 ```
 
 ### 15.2 纯 JS 交付、TS 只做类型检查
 
 - `node:net` / `node:fs` 之外**不引入运行时依赖**；JSDoc 承担类型注解，由 `tsc --noEmit`（`checkJs`）把关；
 - **不引入构建步骤**，从根上避开 `prepare` / `allowBuilds` 授权链（**规范**）；
-- **已知局限（实测）**：`defineTool({...})` 的**调用点无法通过严格类型检查**——
-  `ParameterPropertySpec` 要求 `type: 'string'` 这类**字面量类型**，纯 JS 对象字面量会放宽成 `string`，
-  唯一解法 `as const` 是 TS 语法。
-  → 处置：类型检查聚焦 `lib/` 与 `buildKnowledge.js`（真正会出错的地方），
-  工具注册点靠**运行期验证**（`diagnostics/probeEndToEnd.js` 会真的注册并调用）。
+- **曾经的局限（已解除）**：`defineTool({...})` 要求 `type: 'string'` 这类**字面量类型**，
+  纯 JS 对象字面量一度会放宽成 `string`。现在 `toolDefinition()` 把 `parameters` 直接声明为
+  `ParameterSchemaSpec`，对象字面量靠**上下文类型**保留字面量，于是类型检查覆盖
+  `index.js` + `lib/**` + `buildKnowledge.js` + `test/**`（`pnpm check`），入口不再有 `@ts-nocheck`。
+  → 工具注册点同时保留**运行期结构断言**（`diagnostics/probeEndToEnd.js`）。
 
 ### 15.3 不做设置页
 
@@ -1221,13 +1229,13 @@ README 必须能被一个没读过设计契约的人照着改对：
 | **不要照抄上游的许可口径** | 上游只声明全局 GPL-3.0-or-later，对 `data/manual/**` **一句 CC-BY-SA 都没提**。照抄它就会漏掉手册的署名义务 |
 | **语义摘要不要冒充 GPL 作品** | `*_toolcode.py` 的语义摘要不属于 GPL 衍生作品，**不要**给它加 `SPDX-License-Identifier`；在 NOTICE 里以"参考来源"记一行即可。红线是**不得与原文逐句对应**（那就成了衍生作品） |
 | 示例文件必须随包 | 上游 `pyproject.toml` 的 `package-data` **只声明了 `.rst` 与 `prompts.yml`**，遗漏了 `data/api/examples/*.py`。我们的 `package.json` `files` 与 `meta.json` **必须显式覆盖**，不得照抄上游的声明形状 |
-| **`package.json` 的 `files` 必须真实** | 每一列出的路径都必须存在。**不允许提前声明尚未实现的交付物**（历史教训见 `docs/HISTORY.md`） |
+| **`package.json` 的 `files` 必须真实** | 每一列出的路径都必须存在。**不允许提前声明尚未实现的交付物**（历史教训见 `.AGENTS/history.md`） |
 
 ---
 
 ## 17. 实现不变量 <a id="invariants"></a>
 
-**这是编码红线。ID 一经分配**不重编号、不复用**（`docs/HISTORY.md` 记录已作废 ID 的处置）。**
+**这是编码红线。ID 一经分配**不重编号、不复用**（`.AGENTS/history.md` 记录已作废 ID 的处置）。**
 
 | ID | 不变量 |
 |---|---|
@@ -1266,7 +1274,7 @@ README 必须能被一个没读过设计契约的人照着改对：
    引用**锚点**（如 `contract.md#transport`、`contract.md#invariants`）或**不变量 ID**（`I16`）；
    **不得**引用 `§N`。
 3. **锚点与不变量 ID 是稳定契约**：章节可以增删挪动，锚点与 ID 不变。
-4. 需要"为什么"时指向 [`docs/HISTORY.md`](docs/HISTORY.md)；需要"做到哪一步"时指向 [`STATUS.md`](STATUS.md)；
+4. 需要"为什么"时指向 [`history.md`](../.AGENTS/history.md)；需要"做到哪一步"时指向 [`STATUS.md`](STATUS.md)；
    需要"旧编号对应的现行章节"时看下面的附录 B。
 
 **锚点索引**：`#positioning`、`#core-decisions`、`#decision-knowledge-is-data`、`#decision-identity`、`#decision-localized-errors`、
@@ -1280,27 +1288,27 @@ README 必须能被一个没读过设计契约的人照着改对：
 
 ## 附录 B. 旧编号导航（v2.0 → v3） <a id="appendix-oldrefs"></a>
 
-旧文档的 `§N` 与 `Qn` 不再使用；按下表换算。**旧编号只在 `docs/HISTORY.md` 与两份取证记录里作为历史坐标存在。**
+旧文档的 `§N` 与 `Qn` 不再使用；按下表换算。**旧编号只在 `.AGENTS/history.md` 与两份取证记录里作为历史坐标存在。**
 
 | 旧 | 新 | 旧 | 新 |
 |---|---|---|---|
 | §1（目的与范围） | §1 / §2 | §9.5（预处理与索引） | §12 |
-| §1.2（v1.0 翻转论证） | `docs/HISTORY.md` | §9.6（`docs` 工具） | §13.4 / §13.5 |
+| §1.2（v1.0 翻转论证） | `.AGENTS/history.md` | §9.6（`docs` 工具） | §13.4 / §13.5 |
 | §1.3（与 `dsh-blender` 分工） | §1.3 折叠节 | §9.7（技能入口） | §13.6 |
 | §1.4（三重身份） | §12.1 / §15.1 | §9.8（明确不做） | §11.5 |
 | §2（事实基础） | §3 | §10（联网策略） | §14 |
-| §2.2（安全网现状） | §3.2 / §3.3 | §11（事故复盘） | `docs/HISTORY.md`（I1/I2/I3 留在 §17） |
+| §2.2（安全网现状） | §3.2 / §3.3 | §11（事故复盘） | `.AGENTS/history.md`（I1/I2/I3 留在 §17） |
 | §2.3（上游安全声明） | §2.4 | §12.1（交付形态） | §15.1 |
 | §2.5（名字不是身份） | §2.6 | §12.2 / §12.2a（配置与 README） | §15.3 / §15.5 |
 | §2.7（工具面事实） | §3.6 | §12.2b（接线状态表） | `STATUS.md` |
 | §2.8（错误本地化） | §2.7 | §12.3（安装分发） | §15.4 |
 | §2.9（上游有两个） | §2.8 | §13（实现不变量） | §17（ID 不变） |
 | §3（传输契约） | §4 | §14（许可） | §16 |
-| §4（连接与发现） | §5 | §15（结论状态） | 已并入各节；`Qn` 见 `docs/HISTORY.md` |
+| §4（连接与发现） | §5 | §15（结论状态） | 已并入各节；`Qn` 见 `.AGENTS/history.md` |
 | §4.1（漂移检测） | §5.3 | §16.3（未实现待办） | `STATUS.md` |
-| §5（工具面） | §6 | §17（参考来源） | `docs/HISTORY.md` |
-| §6（工作目录） | §14.4 | Q1–Q9、Q12、Q16–Q22 | 各节；`docs/HISTORY.md` |
-| §7（拦截） | §7 / §8 | Q10、Q11 | **作废**（`docs/HISTORY.md`） |
+| §5（工具面） | §6 | §17（参考来源） | `.AGENTS/history.md` |
+| §6（工作目录） | §14.4 | Q1–Q9、Q12、Q16–Q22 | 各节；`.AGENTS/history.md` |
+| §7（拦截） | §7 / §8 | Q10、Q11 | **作废**（`.AGENTS/history.md`） |
 | §7.7（三层机制） | §9 | Q14（偏好写入口） | §8.5（**已决策：纳入，收窄为三项**） |
 | §8（检查点） | §10 | Q15（deferred 接线） | §4.4（**已决策：接线，待复测**） |
 | §9（知识库论证） | §2.1 / §11 | — | — |

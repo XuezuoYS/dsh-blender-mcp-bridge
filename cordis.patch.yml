@@ -26,9 +26,10 @@
         # 任务目录
         # 留空表示按 taskRootMode 决定；给了绝对路径则以 taskRoot 为准。
         taskRoot: ''
-        # 产出放哪：workspace（会话工作区）| blendFile（活动 .blend 文件旁边的子目录）
-        # ⚠️ blendFile 会把任务目录（也因此把护栏的 allowRoot）挪到工程文件所在目录下。
-        taskRootMode: workspace
+        # 产出放哪：blendFile（默认，活动 .blend 文件所在目录下）| workspace（会话工作区）
+        # ⚠️ 任务目录的位置就是护栏 allowRoot 的位置；blendFile 让它跟着工程文件走
+        # （可写范围仍只有工程目录下的那一个子目录，**这不是安全边界，只防误操作**）。
+        taskRootMode: blendFile
         # 检查点
         checkpoint:
           enabled: true

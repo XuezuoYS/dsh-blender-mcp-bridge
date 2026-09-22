@@ -16,6 +16,6 @@
     "maxNodeModuleJsDepth": 0,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["lib/**/*.js", "buildKnowledge.js"],
+  "include": ["index.js", "lib/**/*.js", "buildKnowledge.js", "test/**/*.js"],
   "exclude": ["node_modules", "diagnostics"]
 }

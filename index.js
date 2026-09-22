@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// @ts-nocheck
-// 上面这行 `@ts-nocheck` 是**有意为之**，不是偷懒：`defineTool({...})` 的调用点在 `checkJs` 下必然报错——
-// `ParameterPropertySpec` 要求 `type: 'string'` 这类**字面量类型**，而纯 JS 对象字面量会被放宽成
-// `string`，唯一解法 `as const` 是 TS 语法（docs/contract.md#packaging 记录了这条已知局限）。
-// 因此类型检查聚焦 `lib/**` 与 `buildKnowledge.js`，工具注册点靠**运行期验证**：
-// `diagnostics/probeEndToEnd.js` 会真的注册工具、逐个调用，并断言 6 个定义的结构完整。
+// 本文件也在 `checkJs` 范围内（jsconfig.json 的 include 里有 index.js）——不再用 `@ts-nocheck` 兜底。
+// 工具参数 schema 的**字面量类型**（`type: 'string'`）靠**上下文类型**保留：`toolDefinition()` 的
+// `parameters` 直接声明为 `ParameterSchemaSpec`，而不是 `Record<string, object>`——后者会把字面量
+// 放宽成 `string`，`defineTool` 立刻拒收。注册点另有 `diagnostics/probeEndToEnd.js` 的运行期结构断言。
 // 注意 SPDX 必须是**第一行**（判定规则是"第一行含字面量 SPDX"，见 docs/contract.md#licensing）。
 
 // 插件入口：profile bundle 的 name / inject / Config / apply。
-// 副作用边界：注册 6 个工具；工具调用期间才会向 add-on 发请求、在 workspace 下建任务目录、
+// 副作用边界：注册 6 个工具；工具调用期间才会向 add-on 发请求、在活动 .blend 所在目录下建任务目录、
 // 以及在 Blender 进程内装运行时护栏。除任务目录外不写任何位置。
 
 import { readFileSync } from 'node:fs'
@@ -83,15 +81,18 @@ export const Config = Schema.object({
   taskRoot: Schema.string().default(''),
   /**
    * `taskRoot` 留空时，任务目录放哪：
-   * - `workspace`（默认）：会话 workspace，`<workspace>/.dsh-blender-<task>/`
-   * - `blendFile`：**活动 .blend 文件所在目录旁边**，`<blendDir>/.dsh-blender-<task>/`
+   * - `blendFile`（默认）：**活动 .blend 文件所在目录下**，`<blendDir>/.dsh-blender-<task>/`
+   * - `workspace`：会话 workspace，`<workspace>/.dsh-blender-<task>/`
    *
-   * ⚠️ `blendFile` 会**改变护栏的 allowRoot**：它与 I5「可写范围只有任务目录」仍然一致
-   * （可写范围依旧只是那一个任务目录），但**任务目录的位置跟着工程文件走**，
-   * 因此等于允许写工程文件所在目录下的一个子目录。
-   * 这是有意的取舍：产出就在工程旁边。不接受这个取舍就用默认的 `workspace`。
+   * 默认取 `blendFile` 是 AGENTS.md「基础安全需要」第 2 条的硬要求：工作目录就在工程文件旁边，
+   * 产出与工程在一起。
+   *
+   * ⚠️ 这个取值同时**决定护栏的 allowRoot**：可写范围依旧只有那一个任务目录，
+   * 但那个目录的位置跟着工程文件走，等于允许写工程文件所在目录下的一个子目录。
+   * **这不是安全边界，只防误操作**（I10）。
+   * 活动工程尚未保存过（没有文件路径）时回退 workspace 并打一条 `console.warn` 说明。
    */
-  taskRootMode: Schema.union(['workspace', 'blendFile']).default('workspace'),
+  taskRootMode: Schema.union(['workspace', 'blendFile']).default('blendFile'),
 
   // ---- 检查点 ----
   checkpoint: Schema.object({
@@ -150,6 +151,7 @@ export const Config = Schema.object({
  * @property {boolean} rejectForeignPeer
  * @property {string} requireVersionMin
  * @property {string} taskRoot
+ * @property {'workspace'|'blendFile'} taskRootMode
  * @property {{enabled: boolean, keep: number, maxBytes: number}} checkpoint
  * @property {{enabled: boolean, guardThreadScope: 'main'|'all'}} intercept
  * @property {{maxHits: number, maxCharsPerHit: number}} knowledge
@@ -157,9 +159,22 @@ export const Config = Schema.object({
  */
 
 /**
+ * 插件上下文：**只声明本插件真正用到的成员**。
+ *
+ * 不直接用 cordis 的 `Context`：`tools` / `systemPrompt` 是宿主按 `inject` 注入的服务，
+ * 它们的类型由宿主侧的服务声明合并提供；本插件只依赖这三个成员，显式声明比依赖合并更稳。
+ *
+ * @typedef {object} AppContext
+ * @property {{register: (definition: import('@deepseek-ai/dsh-tools').ToolDefinition) => void}} tools 工具注册表。
+ * @property {{section?: (options: {name: string, order: number, text: string}) => (() => void)}} [systemPrompt]
+ *   系统提示词服务；缺失时提示词不注册（不阻断插件加载）。
+ * @property {(event: string, listener: (...args: any[]) => void) => void} on 事件订阅。
+ */
+
+/**
  * 注册工具。
  *
- * @param {import('@deepseek-ai/cordis').Context} ctx 插件上下文。
+ * @param {AppContext} ctx 插件上下文。
  * @param {ResolvedConfig} config 生效配置。
  */
 export function apply(ctx, config) {
@@ -269,9 +284,52 @@ export function apply(ctx, config) {
     '**看到 `settingsDrift` 非空就还原，再继续干活。**',
   ].join('\n')
 
+  /**
+   * 提示词段落：**工作目录、撤销与快照的约定**（AGENTS.md「基础安全需要」三条）。
+   *
+   * 与 `SETTINGS_POLICY` 同样是**软限制**：约束模型行为，不阻断执行。
+   * 真正的拦截在 L1/L2（越界写/删、覆盖保存、环境写入口）；两者互补——
+   * 提示词负责"本来就不该做"，护栏负责"做了也拦下来"。
+   */
+  const TASK_POLICY = [
+    '## 在用户的 Blender 会话里干活：三条硬约定',
+    '',
+    '### 1. 永远不要保存用户的这个会话',
+    '',
+    '`bpy.ops.wm.save_mainfile` / `wm.save_as_mainfile`（不带 `copy=True`）一律被拒绝：',
+    '保存会把你的改动混进用户的工作文件，让他分不清哪些是自己做的。',
+    '改动通过 undo 历史回退——**一轮任务 = 一个撤销点**，用户按 `Ctrl+Z` 逐步撤销。',
+    '需要留存进度或把结果交给用户时用 `blender_mcp_snapshot`（写副本，不改会话文件路径）。',
+    '',
+    '### 2. 所有产出只写工作目录',
+    '',
+    '工作目录是**活动 `.blend` 文件所在目录**下的 `.dsh-blender-{任务名}` 子目录，',
+    '名字由 `task` 参数给（缺省是稳定的会话名）。一个任务一个目录，多个任务用多个名字。',
+    '任务目录之外的一切写/删都会被拒绝（L1 发送前拒、L2 运行时兜底），并返回建议落点与接管说明。',
+    '**任务做完不要删目录**；若 `status.existingTaskDirs` 显示同级目录已经很多，',
+    '就**问用户**要不要清理旧的或无用的——删除由用户自己做，你不要代删。',
+    '',
+    '### 3. 快照默认保留 3 份',
+    '',
+    '每次 `mutating: true` 的写操作之前，插件会在任务目录的 `checkpoints/` 落一份 `.blend` 快照，',
+    '默认保留最近 3 份（`checkpoint.keep` 可配，`checkpoint.maxBytes` 可设体积上限）。',
+    '快照写盘失败时**调用直接被拒绝**，不会"没有备份继续做"。',
+    '',
+    '> 这些**不是安全边界，只防误操作**：动态构造的路径、`ctypes`、会话空闲期的异步写入',
+    '> 都能绕过护栏。真正不可逆的操作先问用户。',
+  ].join('\n')
+
+  /** @type {Array<() => void>} */
   const disposers = []
-  if (typeof ctx.systemPrompt?.section === 'function') {
-    disposers.push(ctx.systemPrompt.section({
+  // 绑定 this：`section` 是服务对象上的方法，脱开对象调用会丢掉上下文
+  const registerSection = ctx.systemPrompt?.section?.bind(ctx.systemPrompt)
+  if (registerSection !== undefined) {
+    disposers.push(registerSection({
+      name: 'blender-mcp-bridge-taskdir-policy',
+      order: 890,
+      text: TASK_POLICY,
+    }))
+    disposers.push(registerSection({
       name: 'blender-mcp-bridge-settings-policy',
       order: 900,
       text: SETTINGS_POLICY,
@@ -360,12 +418,23 @@ export function apply(ctx, config) {
   }
 
   /**
-   * 解析任务根目录（同步形态，供只读查询用；取不到 .blend 目录时回退 workspace）。
+   * 解析任务根目录（同步形态，供只读查询用）。
    *
+   * 优先级与 `resolveTaskRoot` 一致：显式 `taskRoot` > `taskRootMode` 决定的位置。
+   * 只读工具**不得**为解析路径额外发请求，所以 `blendFile` 模式下由调用方把**已经拿到的**
+   * 活动工程路径（`status` 的风险姿态里就有）作为 `blendDir` 传进来；拿不到时回退 workspace。
+   *
+   * @default blendDir = undefined
    * @param {unknown} exec 执行上下文。
-   * @returns {string} 绝对路径。
+   * @param {string} [blendDir] 活动 .blend 文件所在目录；只读路径已从握手结果得到。
+   * @returns {string} 任务根目录（即任务目录的父目录）绝对路径。
    */
-  const taskRootOf = (exec) => (config.taskRoot.trim() === '' ? workspaceOf(exec) : config.taskRoot)
+  const taskRootOf = (exec, blendDir) => {
+    const configured = config.taskRoot.trim()
+    if (configured !== '') return configured
+    if (config.taskRootMode !== 'blendFile') return workspaceOf(exec)
+    return blendDir ?? workspaceOf(exec)
+  }
 
   /**
    * 发一段**只读**代码并取回 `result`；失败返回 undefined。
@@ -408,16 +477,18 @@ export function apply(ctx, config) {
   /**
    * 只查找任务目录，不创建（status 是只读工具）。
    *
-   * 只读工具**不得**为解析路径而额外发请求，因此统一用 workspace 形态解析；
-   * `blendFile` 模式下两者的父目录不同，此时只读工具会返回 `taskRoot: null`
-   * ——这是**有意的**：只读工具不该为了"看起来一致"而多打一次 add-on。
+   * 只读工具**不得**为解析路径而额外发请求：默认的 `blendFile` 模式下，
+   * 调用方把已经从握手结果里拿到的活动工程目录作为 `blendDir` 传进来；
+   * 拿不到时回退 workspace，而不是多打一次 add-on。
    *
+   * @default taskName = undefined, blendDir = undefined
    * @param {unknown} exec 执行上下文。
    * @param {string} [taskName] 任务名。
+   * @param {string} [blendDir] 活动 .blend 文件所在目录。
    * @returns {Promise<import('./lib/taskDir.js').TaskDir | undefined>} 任务目录或 undefined。
    */
-  const findTask = async (exec, taskName) => await findExistingTaskDir({
-    workspace: taskRootOf(exec),
+  const findTask = async (exec, taskName, blendDir) => await findExistingTaskDir({
+    workspace: taskRootOf(exec, blendDir),
     taskName: taskName ?? defaultTaskName(exec),
   })
 
@@ -502,19 +573,19 @@ export function apply(ctx, config) {
     knownFingerprint: () => knownFingerprint,
     endpoint: () => endpointOf(config),
     rememberPort: (port) => {
-      if (Number.isInteger(port) && port > 0 && port <= 65_535) discoveredPort = port
+      if (typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65_535) discoveredPort = port
     },
     rememberFingerprint: (fingerprint) => {
       if (fingerprint !== undefined && fingerprint !== null) knownFingerprint = fingerprint
     },
   }
 
-  if (config.expose.status) ctx.tools.register(defineTool(makeStatusDefinition(context)))
-  if (config.expose.inspect) ctx.tools.register(defineTool(makeInspectDefinition(context)))
-  if (config.expose.exec) ctx.tools.register(defineTool(makeExecDefinition(context)))
-  if (config.expose.capture) ctx.tools.register(defineTool(makeCaptureDefinition(context)))
-  if (config.expose.snapshot) ctx.tools.register(defineTool(makeSnapshotDefinition(context)))
-  if (config.expose.docs) ctx.tools.register(defineTool(makeDocsDefinition(context)))
+  if (config.expose.status) ctx.tools.register(makeStatusDefinition(context))
+  if (config.expose.inspect) ctx.tools.register(makeInspectDefinition(context))
+  if (config.expose.exec) ctx.tools.register(makeExecDefinition(context))
+  if (config.expose.capture) ctx.tools.register(makeCaptureDefinition(context))
+  if (config.expose.snapshot) ctx.tools.register(makeSnapshotDefinition(context))
+  if (config.expose.docs) ctx.tools.register(makeDocsDefinition(context))
 }
 
 /**
@@ -538,7 +609,10 @@ function defaultTaskName(exec) {
  * 字段名与结构由各工具自己保证，注册层不做二次改写——
  * 这样「返回字段名一经发布不改」（I23）只有一个来源。
  *
- * @returns {{schema: object, render: (args: unknown, value: unknown) => Array<{type: string, text: string}>}} 输出声明。
+ * @returns {{
+ *   schema: {type: 'object', additionalProperties: true},
+ *   render: (args: unknown, value: unknown) => Array<{type: 'text', text: string}>,
+ * }} 输出声明。
  */
 function jsonOutput() {
   return {
@@ -550,31 +624,36 @@ function jsonOutput() {
 /**
  * 把工具实现包装成 `defineTool` 需要的定义。
  *
+ * 关键在 `@template S` + `@param {S} parameters`：JS 里对象字面量靠**上下文类型**保留
+ * `type: 'string'` 这类字面量，所以 `parameters` 必须直接声明成 schema 类型本身。
+ * 声明成 `Record<string, object>` 会把字面量放宽成 `string`，`defineTool` 立刻拒收。
+ *
+ * @template {import('@deepseek-ai/dsh-tools').ParameterSchemaSpec} S
  * @param {string} name 工具名。
  * @param {string} description 工具描述（模型可见，必须如实写明边界）。
- * @param {Record<string, object>} parameters 参数 schema。
+ * @param {S} parameters 参数 schema。
  * @param {(args: unknown, exec: unknown) => Promise<unknown>} execute 实现。
  * @param {boolean} concurrencySafe 是否声明并发安全。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function toolDefinition(name, description, parameters, execute, concurrencySafe) {
-  return {
+  return defineTool({
     name,
     description,
     parameters,
     isConcurrencySafe: () => concurrencySafe,
     output: jsonOutput(),
-    async execute(args, exec) {
-      return await execute(args, exec)
-    },
-  }
+    // 工具实现返回领域对象（`Record<string, unknown>`），输出 schema 声明为任意 JSON 对象；
+    // 这一次断言只抹平 `unknown` 与 `JsonValue` 的差别，参数与输出 schema 仍由 defineTool 校验。
+    execute: async (args, exec) => /** @type {any} */ (await execute(args, exec)),
+  })
 }
 
 /**
  * `blender_mcp_status` 定义。
  *
  * @param {import('./lib/tools.js').ToolContext} context 工具上下文。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function makeStatusDefinition(context) {
   return toolDefinition(
@@ -592,7 +671,7 @@ function makeStatusDefinition(context) {
  * `blender_mcp_inspect` 定义。
  *
  * @param {import('./lib/tools.js').ToolContext} context 工具上下文。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function makeInspectDefinition(context) {
   return toolDefinition(
@@ -612,7 +691,7 @@ function makeInspectDefinition(context) {
  * `blender_mcp_exec` 定义。
  *
  * @param {import('./lib/tools.js').ToolContext} context 工具上下文。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function makeExecDefinition(context) {
   return toolDefinition(
@@ -628,7 +707,7 @@ function makeExecDefinition(context) {
     {
       code: { type: 'string', required: true, description: 'Python source to run in Blender. Assign the JSON-serializable payload to `result`. NOTE: `bpy` is NOT pre-bound in the execution namespace — write `import bpy` yourself, otherwise the call silently returns an empty result.' },
       mutating: { type: 'boolean', description: 'True when this call changes the scene; a checkpoint is written first and a failure to write it refuses the call.' },
-      task: { type: 'string', description: 'Optional task directory name (defaults to a stable per-session name). Outputs land in <workspace>/.dsh-blender-<task>/.' },
+      task: { type: 'string', description: 'Optional task directory name (defaults to a stable per-session name). Outputs land in .dsh-blender-<task>/ next to the active .blend file.' },
     },
     makeExecTool(context),
     false,
@@ -639,7 +718,7 @@ function makeExecDefinition(context) {
  * `blender_mcp_capture` 定义。
  *
  * @param {import('./lib/tools.js').ToolContext} context 工具上下文。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function makeCaptureDefinition(context) {
   return toolDefinition(
@@ -661,7 +740,7 @@ function makeCaptureDefinition(context) {
  * `blender_mcp_snapshot` 定义。
  *
  * @param {import('./lib/tools.js').ToolContext} context 工具上下文。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function makeSnapshotDefinition(context) {
   return toolDefinition(
@@ -682,7 +761,7 @@ function makeSnapshotDefinition(context) {
  * `blender_mcp_docs` 定义。
  *
  * @param {import('./lib/tools.js').ToolContext} context 工具上下文。
- * @returns {object} 工具定义。
+ * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition} 工具定义。
  */
 function makeDocsDefinition(context) {
   return toolDefinition(

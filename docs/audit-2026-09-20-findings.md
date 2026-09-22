@@ -7,7 +7,10 @@
 > 审计范围：`index.js`、`lib/**`、`buildKnowledge.js`、`diagnostics/**`、`docs/contract.md`。
 > 审计方法：先跑仓库自带的门禁，再逐条把文档主张与代码对照，最后对可疑点写**一次性探针实测**（探针已删除）。
 >
-> 标注约定沿用 [`../AGENTS.md`](../AGENTS.md) §1.6：**实测** / **源码**。
+> 标注约定沿用 `AGENTS.md`：**实测** / **源码**。
+> ⚠️ 本文件里对 `AGENTS.md §N` 的引用用的是**改写前的旧编号**（新版 AGENTS.md 没有章节号）；
+> 同理，文中出现的 `diagnostics/checkRepo.js`、`diagnostics/auditCorpus.js` 如今在
+> [`test/repo.test.js`](../test/repo.test.js) 与 [`test/corpus.test.js`](../test/corpus.test.js)。
 > 本文件**不声称**任何"安全性"结论；两层护栏都不是安全边界（I10）。
 
 ---
@@ -374,7 +377,7 @@ const safeName = sanitizeFileName(rawName, 'snapshot.blend')
   **顶层键**存在性检查。叶子键只要父键被碰过就通过 → F5 这类死配置天然漏网。
   真正的 I12 检查需要解析点号路径并追到读取点。
 - **R4**（`diagnostics/checkRepo.js:138`）扫的是一个**硬编码 18 文件列表**，不含
-  `docs/contract.md` 自身、`docs/design-review-v0.5.md`、`docs/upstream-facts-tools.md`。
+  `docs/contract.md` 自身、`design-review-v0.5.md`（现 [`../.AGENTS/design-review-v0.5.md`](../.AGENTS/design-review-v0.5.md)）、`docs/upstream-facts-tools.md`。
   也就是说契约文件内部的相对链接与锚点**从不被校验**——而 `AGENTS.md` §3 恰恰要求"相对路径要算对，
   写错会让 R4 失效"。列表应当从磁盘枚举 `docs/**` 而不是手写。
 

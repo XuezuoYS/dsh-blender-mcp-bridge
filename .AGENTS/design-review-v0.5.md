@@ -3,14 +3,16 @@
 > 评审人：DSH agent　｜　评审日期：本机 Blender 活动会话实测当日
 > 标注沿用 `contract.md`：**实测**（本机活动 Blender 会话，5.2.2 LTS / Python 3.13.13）/ **源码**（本机扩展源码 + DSH 仓库源码）/ **文档**（上游官方页面与 readme）/ **规范**（官方硬性要求）。
 > 取证脚本：`diagnostics/probeBridge.js`、`probeUndo.js`、`probeUndo2.js`、`probeCheckpoint.js`
-> （均为设计期一次性探针，**已在发布清理中删除**；现存探针见 [`architecture.md`](architecture.md) §10）。
+> （均为设计期一次性探针，**已在发布清理中删除**；现存探针见 [`architecture.md`](../docs/architecture.md) §10）。
+>
+> 📦 位置：dev 周期由 `docs/design-review-v0.5.md` 迁入 `.AGENTS/design-review-v0.5.md`。
 >
 > 🗄️ **已归档（历史文档，不是规范）。**
 > 本文评审的是 `contract.md` **v0.5**，其中的 **§N 是 v2.0 以前的旧编号且已冻结**，不再与现行文档对应；
-> 不要按本文的章节号去查现行 [`contract.md`](../contract.md)，换算表见
-> [`contract.md#appendix-oldrefs`](contract.md#appendix-oldrefs)。
+> 不要按本文的章节号去查现行 [`contract.md`](../docs/contract.md)，换算表见
+> [`contract.md#appendix-oldrefs`](../docs/contract.md#appendix-oldrefs)。
 > **本文的多数结论已被证伪或推翻**（尤其是 undo 可用性、算子拦截方案、许可建议、工具数量），
-> 现行结论以 [`contract.md`](../contract.md) 为准，被证伪的过程见 [`HISTORY.md`](HISTORY.md)。
+> 现行结论以 [`contract.md`](../docs/contract.md) 为准，被证伪的过程见 [`history.md`](history.md)。
 
 ---
 

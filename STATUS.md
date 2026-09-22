@@ -16,13 +16,13 @@
 | `lib/protocol.js` | ✅ 已实现 | 帧编解码、持续 drain、三类超时 |
 | `lib/diagnostics.js` | ✅ 已实现 | 指纹握手、扩展清单只读解析、五级诊断、漂移计算 |
 | `lib/slug.js` | ✅ 已实现 | 纯函数（保留中文、剥控制字符、避 Windows 保留名） |
-| `lib/taskDir.js` | ✅ 已实现 | 属主标记、拒绝复用他人目录、界内判定 |
+| `lib/taskDir.js` | ✅ 已实现 | 属主标记、拒绝复用他人目录、界内判定、同级既有目录列举（`listTaskDirs`，只读） |
 | `lib/checkpoint.js` | ✅ 已实现 | n+1 原子轮换、写盘失败硬失败、回滚来源选择、undo 基线 |
 | `lib/requestPolicy.js`（L1） | ✅ 已实现 | 写路径判定 + 算子名单 + 三项环境写入口 |
 | `lib/guardPayload.js`（L2） | ✅ 已实现 | `bpy.ops` 代理 + `_op_create_function` 透传 + 跨 exec 三坑 |
 | `lib/tools.js` | ✅ 已实现 | 6 个工具的领域逻辑与结果规范化 |
 | `lib/knowledge.js` | ✅ 已实现 | 读 JSONL 索引；`api` / `search` 两种粒度；类成员可寻址 |
-| `blender_mcp_status` | ✅ 已实现并实测 | 握手 + 风险姿态 + 回滚证据 |
+| `blender_mcp_status` | ✅ 已实现并实测 | 握手 + 风险姿态 + 回滚证据 + `existingTaskDirs`（同级既有工作目录，只读列出） |
 | `blender_mcp_inspect` | ✅ 已实现并实测 | 集合 / 数据块计数 / 链接库 / 缺失引用 / 逐对象 |
 | `blender_mcp_exec` | ✅ 已实现并实测 | L1 + 检查点 + L2 三层全通 |
 | `blender_mcp_snapshot` | ✅ 已实现并实测 | `copy=True`，会话 filepath 不变 |
@@ -31,6 +31,8 @@
 | `buildKnowledge.js`（根目录） | ✅ 已实现并实测 | `fetch` / `build` / `verify` 三个子命令全部跑通 |
 | `knowledge/`（语料 + 归一化 + 索引） | ✅ 已落盘 | 4,621 文件 / 16,229,930 B 语料；4,139 文件 / 69,122 段索引 |
 | `skills/blender-mcp-knowledge/` | ✅ 已实现 | `SKILL.md`：检索判定规则 + G3 小抄指向 |
+| `.AGENTS/`（工作记忆） | ✅ 已建立 | `README` / `red-lines` / `history`（由 `docs/HISTORY.md` 迁入）/ `design-review-v0.5`（由 `docs/` 迁入）/ `verification` |
+| `test/`（离线门禁） | ✅ 已建立 | `pnpm test`：仓库一致性（原 `checkRepo`）+ 全语料审计（原 `auditCorpus`），改用 `node:test`；`diagnostics/` 只留需实机 Blender 的临时探针 |
 | 死配置接线 | ✅ 已接线 | `portCandidates` / `allowPortScan` / `deferredTimeoutMs` / `maxResponseChars` / `rejectForeignPeer` 全部有消费者 |
 | `inspect` 的用途猜测 | ❌ 未做（**定位外**） | 缺失引用 / 链接库树已做；"用途猜测"要建模语义，属 [`docs/contract.md#knowledge`](docs/contract.md#knowledge) 明确不做的建模知识引擎 |
 | 知识库的 `literalinclude` 示例通道 | ❌ **未修，已登记**（审计 F13） | 归一化语料有 45 处 `literalinclude:` 指针，但没有任何 mode 能读到被指的 `.py`（`buildKnowledge.js` 注释里的 "`examples[]` 通道" 不存在）。三条候选修法都要先改 [`docs/contract.md#licensing`](docs/contract.md#licensing) 的随包主张（I22），**留给用户决策**，不在本轮擅自改 |
@@ -42,26 +44,29 @@
 | deferred 通道 | ✅ 已接线 | 两段读取：`check_is_finished` 存在时用 `deferredTimeoutMs` 等最终结果（**真 GUI 长任务未复现**） |
 | `LICENSE`（GPL-3.0 全文） | ✅ 已完成 | 已与权威副本逐字节校验一致 |
 | `THIRD_PARTY_NOTICES.md` | ⚠️ 需更新 | 语料 pin 与逐文件 blob sha 已在 `knowledge/meta.json`；NOTICE 里的规模数字待同步 |
-| 全量 SPDX 头（新写的 `.js` 首行） | ✅ 已完成 | `index.js`、`buildKnowledge.js`、`lib/*.js`、`diagnostics/*.js` 首行均已带 |
+| 全量 SPDX 头（新写的 `.js` 首行） | ✅ 已完成 | `index.js`、`buildKnowledge.js`、`lib/*.js`、`test/*.js`、`diagnostics/*.js` 首行均已带 |
 
 **当前没有阻塞性缺陷**：`index.js` 的全部静态 import 都能解析，插件可加载。
 
-**类型检查（`pnpm typecheck`）已通过：0 错误。**
-本仓库可以 `pnpm install`（devDependencies 里有 `typescript`），所以仓库自带的脚本即可直接跑：
+**类型检查（`pnpm check`）已通过：0 错误**，且 `index.js` **不再有整文件 `@ts-nocheck`**。
+`pnpm typecheck` 是同一条命令的别名。本仓库可以 `pnpm install`（devDependencies 里有 `typescript`），
+所以仓库自带的脚本即可直接跑：
 
 ```sh
-pnpm typecheck
+pnpm check
+pnpm test
 ```
 
-覆盖范围是 `lib/**/*.js` 与根目录 `buildKnowledge.js`。两条踩过的坑：
+覆盖范围是 `index.js`、`lib/**/*.js`、`buildKnowledge.js` 与 `test/**/*.js`。两条踩过的坑：
 
 - `jsconfig.json` 需要 `maxNodeModuleJsDepth: 0`——否则 TS 会走进 checkout 的依赖树
   （`events` / `punycode` / `string_decoder`），刷出上百行与本事无关的错误（**实测**）。
 - 未安装 `typescript` 时可退回 DSH checkout 自带的编译器：
   `node "D:/Programs/.RunOnSource/deepseek-harness/node_modules/typescript/bin/tsc" --noEmit -p jsconfig.json`
 
-`index.js` 有意排除，理由见文件首行的 `@ts-nocheck` 注释与
-[`docs/contract.md#packaging`](docs/contract.md#packaging)；它那层契约由 `probeEndToEnd.js` 的**运行期结构断言**覆盖。
+`index.js` **已纳入类型检查**（`jsconfig.json` 的 `include` 里有它，首行不再有 `@ts-nocheck`）。
+工具参数 schema 的字面量类型靠**上下文类型**保留：`toolDefinition()` 的 `parameters` 声明为
+`ParameterSchemaSpec`。注册点另有 `probeEndToEnd.js` 的**运行期结构断言**兜底。
 
 ---
 
@@ -76,7 +81,7 @@ pnpm typecheck
 | `requireVersionMin` | ✅ 已接线 | `status` 门控 + `exec` 前置检查 |
 | `rejectForeignPeer` | ✅ **已接线** | `status` 与 `exec` 都读它 |
 | `maxResponseChars` | ✅ **已接线** | `exec` 的 stdout/stderr 截断 |
-| `taskRoot` / `taskRootMode` | ✅ 已接线 | 任务目录根；`blendFile` 模式把产出放到活动 `.blend` 旁边（探针 4/4） |
+| `taskRoot` / `taskRootMode` | ✅ 已接线 | 任务目录根；默认 `blendFile`——产出落在活动 `.blend` 所在目录下（探针 4/4）。显式 `taskRoot` 优先级最高 |
 | `checkpoint.enabled` / `.keep` / `.maxBytes` | ✅ 已接线 | 检查点（`closeRound` 在 `turn/end` 触发） |
 | `intercept.enabled` / `.guardThreadScope` | ✅ 已接线 | 传给 L2 载荷 |
 | `knowledge.maxHits` / `.maxCharsPerHit` | ✅ **已接线** | `docs` 三种 mode 都读它 |
@@ -131,7 +136,7 @@ pnpm typecheck
 | `include` 展开 | ✅ 245 处里 220 处成功展开（`api/bmesh.rst` 归一化后 1,109 → 5,872 字节），25 处登记为未识别 |
 | 索引损坏路径（I17） | ✅ 实测：移开 `files.jsonl` → `available:false` + 可执行指引、不报 `isError`；放回后立即恢复 |
 
-### 3.1b 全语料审计（`node diagnostics/auditCorpus.js`，**15/15**）
+### 3.1b 全语料审计（`test/corpus.test.js`，`pnpm test`：**15/15**）
 
 **不再只人工看三个文件**：4,508 个 `.rst` 全部过一遍，逐文件比对产物。审计途中发现并修掉 4 个真缺陷：
 
@@ -156,7 +161,7 @@ pnpm typecheck
 | D1/D2/D3 directive 全部归类、未识别占比、登记名真实存在 | ✅ 未识别 853/37,799 = **2.26%** |
 | E1 归一化字节数与 `meta.json` 一致 | ✅ 14,725,671 逐字节吻合 |
 
-### 3.1c 仓库一致性审计（`node diagnostics/checkRepo.js`，**13/13**）| 检查 | 结果 |
+### 3.1c 仓库一致性审计（`test/repo.test.js`，`pnpm test`：**13/13**）| 检查 | 结果 |
 |---|---|
 | R1 `package.json` 的 `files` 每一项都真实存在 | ✅ 10 项 |
 | R2a/R2b/R2c schema ↔ `cordis.patch.yml` ↔ README 三方键一致；已删除的键未复活 | ✅ 15 个顶层键三方一致 |
@@ -326,9 +331,10 @@ pnpm typecheck
 ## 4. 端到端验收结果
 
 `diagnostics/probeEndToEnd.js` **真的调用 `apply()`、真的注册工具、真的逐个调用**（不是静态检查）。
-另有三条独立套件：[`diagnostics/auditCorpus.js`](diagnostics/auditCorpus.js)（全语料，15/15）、
-[`diagnostics/checkRepo.js`](diagnostics/checkRepo.js)（仓库一致性，13/13）、
-[`diagnostics/probeFindings.js`](diagnostics/probeFindings.js)（审计发现的逐条回归，41/41，**需要实机 Blender**）。
+离线门禁在 `test/`：[`test/corpus.test.js`](test/corpus.test.js)（全语料，15/15）、
+[`test/repo.test.js`](test/repo.test.js)（仓库一致性，13/13）——`pnpm test` 即可跑，不需要 Blender。
+实机套件还有 [`diagnostics/probeFindings.js`](diagnostics/probeFindings.js)（审计发现的逐条回归，41/41，
+**需要实机 Blender，且不入库**）。
 
 | # | 用例 | 结果 |
 |---|---|---|

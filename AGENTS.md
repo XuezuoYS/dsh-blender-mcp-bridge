@@ -84,6 +84,18 @@ export class AClass {
    类 hover 为空。只能拆块，不能删（删了会丢类型并抬高 `pnpm check` 诊断数）。
 
 
+### 许可与 SPDX
+
+本项目以 **`GPL-3.0-or-later`** 分发（内联上游语料即再分发）。完整条款见 [`LICENSE`](LICENSE)，
+上游来源、版本与修改声明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+- 新写的 `.js` **首行**必须是 `// SPDX-License-Identifier: GPL-3.0-or-later`
+  （判定规则：第一行含字面量 `SPDX`）。
+- `package.json` 的 `files` 里不得列不存在的路径，也不得提前声明尚未实现的交付物。
+- 语料两部分许可不同：`knowledge/source/api/` 随上游为 GPL-3.0-or-later，
+  `knowledge/source/manual/` 是 **CC-BY-SA-4.0**（署名 `Blender Documentation Team`）；
+  按**更严格的一方**履行（两者都署名）。细节留在 `THIRD_PARTY_NOTICES.md`。
+
 ### git
 
 **未经明确指令，禁止操作 git，指令有效期仅一轮内有效**

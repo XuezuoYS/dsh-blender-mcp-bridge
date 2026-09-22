@@ -131,6 +131,7 @@ function printUsage() {
  *
  * 请求可断点续传：已存在且 sha1 与上游记录一致的文件会被跳过。
  *
+ * @default options = {}
  * @param {string} revision 语料 commit sha。
  * @param {{concurrency?: number, skipContent?: boolean}} [options] 选项。
  * @returns {Promise<void>} 完成时 resolve。
@@ -635,6 +636,7 @@ async function collectExamples(dir) {
  *
  * **未识别的 directive 不丢弃**：原文进 `unparsedBlocks`，并登记进未识别清单。
  *
+ * @default context = {}
  * @param {string} text RST 原文。
  * @param {string} path 相对路径（用于面包屑与登记）。
  * @param {{sourceDir?: string, included?: Set<string>, initialSections?: string[]}} [context] 上下文（include 展开用）。
@@ -687,6 +689,7 @@ async function parseRst(text, path, context = {}) {
   /**
    * 收段落。
    *
+   * @default meta = {}
    * @param {{type?: string, name?: string, directive?: string}} [meta] 数据块元信息。
    */
   const flush = (meta = {}) => {
