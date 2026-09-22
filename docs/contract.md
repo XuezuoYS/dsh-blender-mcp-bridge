@@ -12,16 +12,16 @@
 > |---|---|---|
 > | **本文件** | 契约、规则、不变量、验收判据 | 实现进度、历史决策过程、逐条取证记录 |
 > | [`../README.md`](../README.md) | 用户可见的说明、安装、配置、排错 | 规则推导过程 |
-> | [`../STATUS.md`](../STATUS.md) | 交付清单、配置接线状态、待实测项 | 任何契约 |
-> | [`../.AGENTS/README.md`](../.AGENTS/README.md) | 工作记忆：迁入的红线、决策史、被证伪的旧结论、验证门禁 | 任何仍然生效的规则 |
+> | [`../.AGENTS/README.md`](../.AGENTS/README.md) | **交付状态 + 工作记忆的单一入口**：交付清单、配置接线状态、实测结论、待实测项、决策史、被证伪的旧结论、验证门禁 | 任何仍然生效的规则 |
 > | [`architecture.md`](architecture.md) | 仓库结构、模块分层、运行路径（导读） | 规则本身 |
+> | [`blender-5.2-findings.md`](blender-5.2-findings.md) | Blender 5.2 的实测事实（G3 规则的直接依据） | 契约、交付状态 |
 > | [`upstream-facts-tools.md`](upstream-facts-tools.md) | 上游协议 / 工具契约 / 安全面 / 许可的逐条取证 | 本项目自己的规则 |
-> | [`upstream-facts-docs.md`](upstream-facts-docs.md) | 上游文档检索层（RST 解析与检索）的逐条取证 | 同上 |
+> | [`upstream-facts-docs.md`](upstream-facts-docs.md) | 上游文档检索层（RST 解析与索引）的逐条取证 | 同上 |
 > | [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) | 上游语料的署名、许可与修改声明 | 设计理由 |
 > | [`../AGENTS.md`](../AGENTS.md) | AI 行为准则（基础安全需要、类型安全、注释风格、git 约束、许可与 SPDX） | 项目定位与设计理由 |
 >
 > **引用约定**：本文件内部可以用章节号；**外部文件一律引用锚点**（`contract.md#transport`、`#invariants`）
-> 或直接引用不变量 ID（`I1`–`I25`），不得引用裸章节号。章节号允许随版本变化，**锚点与不变量 ID 不变**。
+> 或直接引用不变量 ID（`I1`–`I27`），不得引用裸章节号。章节号允许随版本变化，**锚点与不变量 ID 不变**。
 
 ---
 ---
@@ -367,7 +367,7 @@ undo 至多是一条需要自证安全的加速路径。）
 |---|---|
 | 完全一致 | 正常检索 |
 | 小版本不同 | 正常检索，`docs` 返回带 `drift` 字段说明「语料来自 X，当前是 Y」 |
-| 大版本不同 | 正常检索，但**置顶**一条 `warnings`，要求 AI 向用户提示"知识可能过期，建议重建索引" |
+| 大版本不同 | 正常检索，但**置顶**一条 `warnings`（返回体顶层 `warnings: string[]`），要求 AI 向用户提示"知识可能过期，建议重建索引" |
 | 无法取得版本 | 不猜，`drift` 记为 `unknown` |
 
 **这不是硬阻塞**（**I11**）：旧版本的 RST 多数情况下仍可用，硬拦会让用户失去唯一的离线参考。
@@ -397,11 +397,12 @@ undo 至多是一条需要自证安全的加速路径。）
 | `path` | 当前 `.blend` 路径 |
 | `save_status` | 是否 dirty |
 | `age` | 文件 mtime 与距今天数 |
-| `backups` | 可用检查点列表 |
+| `backups` | 可用检查点列表（可用可选参数 `task` 指定任务目录名，否则用默认任务名——**实测缺口**：自定义任务名的备份此前看不见，`backups: []` 而磁盘上明明有文件） |
 | 场景规模 | 场景内非本插件数据的规模 |
-| 本轮检查点 | 本轮是否已建立 |
+| 本轮检查点 | 本轮是否已建立（**内存登记 ∪ 磁盘上已存在的 `turn-{T}*.blend`**；只看内存登记时会对已落盘的快照报 `false`，**实测踩过**） |
 | `restoreEvidence` | 回滚候选与 `argmax(mtime)` 结论（有检查点或用户文件时才有） |
 | `undoPrecheck` | undo 通道的前置条件证据；**实测在 5.2 上恒为 `measurable: false`**（[#checkpoint-undo](#checkpoint-undo) 第 5 条）。与 `restoreEvidence` **平级且独立**——未保存的工程没有用户文件，但可能有基线 |
+| `sessionChecklist` | **完成态交接**（I26）：`isDirty` / 任务目录 / 检查点份数 / 快照文件 / `nextSteps[]` |
 
 理由来自建模经验：开场时场景为空，重手操作才安全；**若已有用户未保存的工作，风险等级完全不同**。
 
@@ -439,13 +440,15 @@ undo 至多是一条需要自证安全的加速路径。）
 |---|---|
 | `checkpoint` | 本轮检查点路径 / 是否本轮首次落盘 |
 | `undo` | 是否已 `undo_push`（`channel`：`undo-push` / `undo-skipped-existing-checkpoint` / `undo-disabled` / `undo-failed` / `not-applicable`）。**放弃 undo 路径**由调用方依据 `status` 的 `riskPosture.undoPrecheck` 判定（[#checkpoint-undo](#checkpoint-undo)），不在 exec 返回里 |
-| `guard` | `verified` / `opsProxyIntact` / `tampered` / `reinstalls` / `residualHooks` / `hooksUnloaded` |
-| `blocked` | 命中 L1/L2 时给出。**两层形状不同且都已发布，不得统一改名**：L1 = `blocked_path` / `reason` / `suggested_path` / `handoff` / `evidence` / `explanation`；L2 = `reason` / `events`（逐次命中的调用与路径）/ `suggested_path` / `handoff` |
+| `guard` | `verified` / `opsProxyIntact` / `tampered` / `reinstalls` / `residualHooks` / `hooksUnloaded` / **`window`**（覆盖到的窗口，措辞见 §9.5）/ **`jobsRunning`**（窗口外仍在跑的后台任务） |
+| `blocked` | 命中 L1/L2 时给出。**两层形状不同且都已发布，不得统一改名**：L1 = `blocked_path` / `reason` / `suggested_path` / `handoff` / `evidence` / `explanation`；L2 = `reason` / `events`（逐次命中的调用与路径）/ `suggested_path` / `handoff`。命中 ≥2 条时附 **`blockedAll`**（§8.7） |
 | `noticed` | L2 **放行**但记了账的调用（`contract` §9 的 `noted`）；没有则缺席 |
 | `issues` | L1 静态命中的模式与位置（**提示**性质，不代表已拦） |
-| `changes` | 改动清单：这次动了哪些数据块（增 / 删计数） |
+| `changes` | 改动清单：这次动了哪些数据块。**增/删为聚合形状**（`objectsAdded: {count, byType, sample≤10}` + `objectsAddedTruncated`），逐条回显会在批量建对象时把响应顶爆（报告实测多轮 ~1k token/次）。**就地修改**由 `objectsModified` / `dataBlocksModified` 报出（**实测缺口**：改合成器参数 / 顶点 / 材质此前不产生任何 `changes`，而提示词把合成器内容列为用户所有） |
 | `warnings` | 体积超限（§10.6）等 |
 | `settingsDrift` / `settingsBaselineKnown` | 渲染/导出设置的会话基线比对；`Known=false` 时**空 drift 不等于"没改"** |
+| `handoffHint` | **每次返回都在**（I26）：会话仍 dirty 时明确提示"改动没有保存在你的文件里、可按 Ctrl+Z、要出图请按 F12、任务目录已保留" |
+| `partial` | 仅当本次以异常结束、而 L2 差分显示**改动已部分生效**时出现；附 `warnings` 一条说明"这些改动已保留在场景里，可回滚到 `checkpoint.path`" |
 
 **被拦不是"把失败伪装成成功"**：L1 命中在**发送之前**就返回，`status: "blocked"` + 结构化字段，
 让 agent 能立刻改用 `suggested_path` 重试（**实测**：这是纯 Node 侧判定，add-on 收不到任何请求）。
@@ -503,9 +506,9 @@ undo 至多是一条需要自证安全的加速路径。）
 |---|---|---|
 | **覆盖保存** | `wm.save_as_mainfile` 且非 `copy=True`；`wm.save_mainfile`（等价 Ctrl+S）；写向已存在文件 | **拒绝** → 引导 `snapshot` |
 | **丢弃会话** | `wm.read_homefile`、`wm.read_factory_*` | **拒绝** |
-| **越界删除** | `os.remove/unlink/rmdir`、`shutil.rmtree`、`os.replace/rename`，且 `realpath` 不落在任务目录内 | **拒绝 + 接管提示**（§7.2） |
+| **越界删除** | `os.remove/unlink/rmdir`、`shutil.rmtree`、`os.replace/rename`、`shutil.move`，且**任一实参**的 `realpath` 不落在任务目录内 | **拒绝 + 接管提示**（§7.2） |
 | **任务目录内删除** | 同上，但 `realpath` 落在 `.dsh-blender-{task}/` 内 | **放行**——中间产物可自由清除 |
-| **越界写** | 任何写操作（`io.open` / `os.open` / `shutil.copyfile\|copy2\|move` / `os.truncate` / pathlib 写族），`realpath` 不在任务目录内 | **拒绝 + 接管提示**（§7.2） |
+| **越界写** | 任何写操作（`builtins.open` / **`io.open`** / `os.open` / `shutil.copyfile\|copy2\|copytree\|move` / `os.truncate` / pathlib 写族 / 文件输出算子），`realpath` 不在任务目录内 | **拒绝 + 接管提示**（§7.2） |
 | **环境改动** | 偏好写入口、add-on 开关、脚本自动执行 | **拒绝**（范围见 §9.5） |
 | 打开其它文件 | `wm.open_mainfile` | **不拦**，但强制先落检查点 + 显式确认（§8.3） |
 | 数据删除 | `bpy.data.*.remove()` | **不拦**，**运行时**比对数据块并报告目标清单（§8.4） |
@@ -543,6 +546,24 @@ undo 至多是一条需要自证安全的加速路径。）
 上述机制防的是**疏忽**，不是**对抗**。动态构造、`importlib.reload`、直接调 C API 都能绕过。
 工具描述与 README 中**不得**出现"安全沙箱""已保护你的数据"字样（I10）。
 上游明文声明无任何防护（§2.4），本插件只是**加了一层防误操作**，不改变这一事实。
+
+**两条必须写明的判定边界**：
+
+- **改名 / 移动作族按"任一实参越界即拒"判定**（**实测教训**：此前只校验第一个实参＝源，
+  于是 `shutil.move(界内 → 界外)`、`os.rename`、`os.replace` 的**目标端**可以越界写成功）。
+  fail-closed：宁可误拦，不可漏放。
+- **有写盘能力但没有路径实参的算子（例如 `image.save()`）没有可判定的目标**：
+  L1 与 L2 都**无法判定**它写到哪，因此**不得**声称它已被覆盖。要判定 `image.save_as()` 这类
+  带路径实参的算子，走 §8.2 的"文件输出算子"条目。
+
+### 8.7 一次拒绝要能列出全部命中
+
+**实测**：三个越界载荷写在同一个 `exec` 里时，此前只报**第一个**命中，其余不列出——
+对"告诉用户犯了哪条规"够用，对"审计一次 payload 的全部风险面"不够。
+
+要求：扫描**不得**在第一个命中处停下；返回体里 `blocked` 的既有字段仍取**第一个**命中
+（字段名与形状不变，I23），并新增 `blockedAll`（命中 ≥2 条时出现）列出本次全部命中。
+`issues` 同时带全部命中（L1 的提示性质不变）。
 
 ---
 
@@ -616,8 +637,10 @@ undo 至多是一条需要自证安全的加速路径。）
 
 - **判定范围**：`allowRoot` = 本任务目录的 `realpath`；用 `abspath` + `realpath` + `normcase` 与根做前后缀比较
   （Windows 大小写不敏感）。
-- **覆盖入口**：`builtins.open`（写模式：`w`/`a`/`x`/`+`）、
-  `os.open`（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_APPEND`/`O_TRUNC`）、删除/改名族按 §8.2 清单、
+- **覆盖入口**：`builtins.open`（写模式：`w`/`a`/`x`/`+`）、**`io.open`**（必须一并包裹：
+  CPython 里 `io.open is builtins.open`，两者都要指向同一个钩子，否则会有名字漏网）、
+  `os.open`（`O_WRONLY`/`O_RDWR`/`O_CREAT`/`O_APPEND`/`O_TRUNC`）、`os.truncate`、
+  删除/改名族按 §8.2 清单（**全部实参**）、文件输出算子（路径实参）、
   以及 §8.5 的三项环境写入口。
 - **只读一律放行**：非写模式的 `open` 直接透传（**实测**读操作零影响）。
 - **线程策略**：`guardThreadScope = main`（默认）时只有 `threading.main_thread()` 上的调用受检，其余线程**一律透传**；
@@ -625,6 +648,12 @@ undo 至多是一条需要自证安全的加速路径。）
   理由：补丁是进程级全局的，而 `exec` 只在主线程；后台线程（渲染、图像保存、插件 I/O）在补丁窗口内被拦会造成无法解释的故障面。
   **代价必须写进 README。**
 - **拦截窗口 = 同步 exec 期间**；窗口外的异步 / 延迟写不受约束。
+  **返回体必须如实说明这个窗口到哪结束**：`guard.window` 给出措辞（`exec（主线程同步期间）`），
+  并新增 `guard.jobsRunning` 列出仍在运行的后台任务（异步渲染等）——**实测事故**：
+  一次 `INVOKE_DEFAULT` 起的渲染在 exec 返回之后写出了 `C:\tmp\Untitled.png`，
+  而护栏对此完全无感，返回体里的 `hooksUnloaded:true` 却给人一种"全程覆盖"的错觉。
+  检测到仍在运行的后台任务时**不**拒绝结束本次 exec（那会把"渲染被记错成失败"的代价加给用户），
+  而是让它**可见**。
 
 ### 9.6 返回值与自检
 
@@ -642,8 +671,8 @@ L2 命中保留信封的 `error` 并附上 `blocked`（traceback 是定位越界
 |---|---|---|---|
 | `checkpoint.enabled` | `true` | — | 默认开 |
 | `checkpoint.keep` | `3` | 1–**20** | 保留轮次数 |
-| `checkpoint.maxBytes` | `0`（不限） | ≥0 | **体积上限** |
-| `checkpoint.perTurn` | `1` | 固定 | 一轮只存一版 |
+| `checkpoint.maxBytes` | `0`（不限） | ≥0 | **体积上限**；超限的旧份在**轮次结束的收尾轮换**里优先被回收（不再只是告警）。⚠️ 写前**不删**——先写第 n+1 份、轮次结束才回落，见 §10.3 |
+| `checkpoint.perTurn` | `'turn'` | `turn` \| `write` | 检查点粒度。`turn` = 一轮一份（`turn-{T}.blend`）；`write` = 每次 `mutating:true` 的写各落一份（`turn-{T}-{seq}.blend`）。**实测动机**：一轮 40+ 次写全部共享一份"轮次起点"快照时，中段误删只能整体回滚 |
 
 ### 10.2 轮次边界（一次用户请求 = 一轮）
 
@@ -666,13 +695,19 @@ ctx.on('session/event', (session, event) => {
 
 设当前配置保留 `n` 份：
 
-1. **轮次落检查点时先写第 `n+1` 份**（`turn-{T}.blend`）。此刻磁盘上最多 `n+1` 份。
+1. **轮次落检查点时先写第 `n+1` 份**（`turn-{T}.blend`，或 `perTurn='write'` 时的 `turn-{T}-{seq}.blend`）。
+   此刻磁盘上最多 `n+1` 份。
 2. **轮次结束后**才清除最早的，回落到 `n` 份。
 3. 因此**任何时刻都不会先删旧快照再写新快照**——写入失败也绝不丢历史（I8）。
+4. **配额按文件数算**（`perTurn='write'` 时一个轮次会占多份，这是该取值的代价，如实写在 README 配置表里）。
+5. `maxBytes > 0` 时，**超限的旧份**在**收尾轮换**（第 2 步）里优先列入删除计划。
+   写前阶段**绝不删除**：若在写新快照之前回收，而写入失败（磁盘满 / 权限不足——正是 I1 要防的场景），
+   旧历史就已经被删掉；`keep = 1` 时更会把唯一一份备份删空。峰值份数是 `keep + 1`，这是它的代价。
 
 ### 10.4 实现
 
-- 路径：`<任务目录>/checkpoints/turn-{T}.blend`（任务目录默认在活动 `.blend` 所在目录下，见 [#taskdir](#taskdir)）
+- 路径：`<任务目录>/checkpoints/turn-{T}.blend`（`perTurn='write'` 时为 `turn-{T}-{seq}.blend`）；
+  任务目录默认在活动 `.blend` 所在目录下，见 [#taskdir](#taskdir)。
 - 调用：`bpy.ops.wm.save_as_mainfile(filepath=…, copy=True)`——`copy=True` **不改动会话当前文件路径**（**实测**）。
 - **轮换删除只针对「本插件登记过的、且属于本会话的」检查点**（**I1**：保护集合为空则硬中止）。
   多会话并发时，检查点文件名必须带**会话稳定标识**，禁止用名字判定归属（I2）。
@@ -1004,11 +1039,16 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 
 | 入口 | 作用 | 由谁保证 |
 |---|---|---|
-| **技能壳**（`skills/blender-mcp-knowledge/`） | 进入 Blender 任务时加载：**常驻 G3 小抄** + 「什么时候必须查 `blender_mcp_docs`」的判定规则（写算子参数前、遇到 `poll` 失败时、不确定枚举值时） | DSH 技能机制按需加载 |
+| **技能**（`skills/blender-mcp-knowledge/SKILL.md`） | 进入 Blender 任务时按需加载：**常驻 G3 小抄** + 「什么时候必须查 `blender_mcp_docs`」的判定规则（写算子参数前、遇到 `poll` 失败时、不确定枚举值时） | 插件在 `apply()` 时用 `ctx.skills.register()` 注册为**运行时技能**（`source: 'runtime'`） |
 | **`blender_mcp_docs` 工具** | 真正的检索入口，token 有界 | 插件工具面 |
 
-**为什么需要技能壳**：一个工具即便做出来，模型也可能整场不调用它——它不会"想起来要查 API"。
+**为什么需要技能**：一个工具即便做出来，模型也可能整场不调用它——它不会"想起来要查 API"。
 **技能是壳不是数据**：技能目录里放 SKILL 描述与检索判定规则；**数据在 `knowledge/`**。
+
+**为什么必须真的注册**（**实测缺口**）：此前 `skills/` 只是包内的一个普通目录，
+插件只注册工具与提示词，于是会话技能目录里**看不到这个技能**——它只能被"读到文件"才起作用，
+等于把"消费入口"寄托在模型碰巧去读它。现在它经 `skill` 服务注册（缺该服务时**只退回文件**，
+不阻断插件加载），`SKILL.md` 仍是真身来源、可被人工直读。
 
 ### 13.7 检索成本基线（**实测**，来自上游做法）
 
@@ -1023,7 +1063,7 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 | 单次响应体积（`maxResults=20`） | 8.4–16.6 KB ≈ 2–4K token |
 
 → **I20 的直接依据**：预构建的价值不在"避免解析"，而在"避免每次读 16 MB"。
-**验收目标**：单次检索显著优于上游的 0.39–1.22 s（测法见 `STATUS.md`）。
+**验收目标**：单次检索显著优于上游的 0.39–1.22 s（测法见 [`../.AGENTS/README.md`](../.AGENTS/README.md)）。
 
 ---
 
@@ -1038,7 +1078,8 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 ### 14.2 配置键全集
 
 **原则（I12）**：schema 里出现的键，**必须真的被代码读取**。
-不允许"看起来已实现"的死配置留在 schema / YAML / README 里。当前接线状态见 `STATUS.md`。
+不允许"看起来已实现"的死配置留在 schema / YAML / README 里。当前接线状态见
+[`../.AGENTS/README.md`](../.AGENTS/README.md) 的配置接线表。
 
 | 键 | 默认 | 域 |
 |---|---|---|
@@ -1053,7 +1094,7 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 | `requireVersionMin` | `'5.1'` | 版本门控 |
 | `taskRoot` | `''`（空 = 按 `taskRootMode` 决定） | 任务目录 |
 | `taskRootMode` | `'blendFile'` | 任务目录（`blendFile` = 活动 `.blend` 同级；`workspace` = 会话工作区） |
-| `checkpoint.enabled` / `.keep` / `.maxBytes` | `true` / `3` / `0` | 检查点 |
+| `checkpoint.enabled` / `.keep` / `.maxBytes` / `.perTurn` | `true` / `3` / `0` / `'turn'` | 检查点（`perTurn` = `turn` \| `write`，§10.1） |
 | `intercept.enabled` / `.guardThreadScope` | `true` / `'main'` | 护栏 |
 | `knowledge.maxHits` | `8` | 知识库（1–50） |
 | `knowledge.maxCharsPerHit` | `4000` | 知识库（200–20000） |
@@ -1124,10 +1165,11 @@ dsh-blender-mcp-bridge/
 │   └── blender-mcp-knowledge/   # DSH 技能壳（§13.6）
 ├── knowledge/             # 语料 + 归一化 + 索引 + meta.json（§12.1）
 ├── jsconfig.json          # checkJs + strict：类型检查用，不产出构建产物
-├── STATUS.md / AGENTS.md / README.md
-├── .AGENTS/               # 工作记忆（非交付物）：红线、决策史、验证门禁
-├── test/                  # 入库门禁（非交付物）：仓库一致性 + 全语料审计，离线可跑
-├── docs/                  # 契约与取证记录（非交付物）
+├── AGENTS.md / README.md / THIRD_PARTY_NOTICES.md   # 规范类（根目录只保留这三份）
+├── .AGENTS/               # 交付状态 + 工作记忆（非交付物）：README（单一入口）/ 红线 / 决策史 /
+│                          #   审计与报告记录 / 验证门禁
+├── test/                  # 入库门禁（非交付物）：仓库一致性 + 全语料审计 + 报告逐条回归，离线可跑
+├── docs/                  # 契约、导读、实测发现与上游取证（非交付物）
 └── diagnostics/           # 临时探针（非交付物，**不入库**）
 ```
 
@@ -1264,17 +1306,20 @@ README 必须能被一个没读过设计契约的人照着改对：
 | **I23** | 工具名、参数名与返回字段名**一经发布不改**（兼容红线） |
 | **I24** | **未识别的 RST directive 必须显式可见**：保留原文并标注 `unparsed`，不得静默丢弃内容；构建脚本必须输出未识别清单 |
 | **I25** | **「代码基线」与「语料基线」分别记录**，精确到 commit sha 与 blob sha；不得用上游 `manifest.json` 的版本号推导语料版本 |
+| **I26** | **完成态必须交接**：`exec` 每次返回必须带 `handoffHint`（会话仍 dirty 时明确写出"未保存 / 可 Ctrl+Z / 渲染请按 F12 / 任务目录已保留"）；`status` 必须带 `sessionChecklist`。**拒绝态**的接管话术（§7.2）**不能代替**完成态的交接 |
+| **I27** | **场景整洁约定属于交付行为**：系统提示词必须包含"集合分层 + `<类别>_<角色>_<序号>` 命名 + 四边面优先 + 灯光与体积各自成组"这段软限制；不得把"组织与命名"完全推给用户或委托给模型碰运气 |
 
 ---
 
 ## 附录 A. 文档间引用规则 <a id="appendix-refs"></a>
 
 1. **本文件内部**：可以用 `§N`（章节号允许随版本变化）。
-2. **外部文件**（`README.md` / `AGENTS.md` / `docs/**` / `THIRD_PARTY_NOTICES.md` / 代码注释）：
+2. **外部文件**（`README.md` / `AGENTS.md` / `.AGENTS/**` / `docs/**` / `THIRD_PARTY_NOTICES.md` / 代码注释）：
    引用**锚点**（如 `contract.md#transport`、`contract.md#invariants`）或**不变量 ID**（`I16`）；
    **不得**引用 `§N`。
 3. **锚点与不变量 ID 是稳定契约**：章节可以增删挪动，锚点与 ID 不变。
-4. 需要"为什么"时指向 [`history.md`](../.AGENTS/history.md)；需要"做到哪一步"时指向 [`STATUS.md`](STATUS.md)；
+4. 需要"为什么"时指向 [`history.md`](../.AGENTS/history.md)；需要"做到哪一步"时指向
+   [`../.AGENTS/README.md`](../.AGENTS/README.md)；
    需要"旧编号对应的现行章节"时看下面的附录 B。
 
 **锚点索引**：`#positioning`、`#core-decisions`、`#decision-knowledge-is-data`、`#decision-identity`、`#decision-localized-errors`、
@@ -1300,12 +1345,12 @@ README 必须能被一个没读过设计契约的人照着改对：
 | §2.2（安全网现状） | §3.2 / §3.3 | §11（事故复盘） | `.AGENTS/history.md`（I1/I2/I3 留在 §17） |
 | §2.3（上游安全声明） | §2.4 | §12.1（交付形态） | §15.1 |
 | §2.5（名字不是身份） | §2.6 | §12.2 / §12.2a（配置与 README） | §15.3 / §15.5 |
-| §2.7（工具面事实） | §3.6 | §12.2b（接线状态表） | `STATUS.md` |
+| §2.7（工具面事实） | §3.6 | §12.2b（接线状态表） | `.AGENTS/README.md` |
 | §2.8（错误本地化） | §2.7 | §12.3（安装分发） | §15.4 |
 | §2.9（上游有两个） | §2.8 | §13（实现不变量） | §17（ID 不变） |
 | §3（传输契约） | §4 | §14（许可） | §16 |
 | §4（连接与发现） | §5 | §15（结论状态） | 已并入各节；`Qn` 见 `.AGENTS/history.md` |
-| §4.1（漂移检测） | §5.3 | §16.3（未实现待办） | `STATUS.md` |
+| §4.1（漂移检测） | §5.3 | §16.3（未实现待办） | `.AGENTS/README.md` |
 | §5（工具面） | §6 | §17（参考来源） | `.AGENTS/history.md` |
 | §6（工作目录） | §14.4 | Q1–Q9、Q12、Q16–Q22 | 各节；`.AGENTS/history.md` |
 | §7（拦截） | §7 / §8 | Q10、Q11 | **作废**（`.AGENTS/history.md`） |

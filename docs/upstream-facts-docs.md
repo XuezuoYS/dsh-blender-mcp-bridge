@@ -5,7 +5,7 @@
 >
 > 📌 **本文里的 `§N` 指的是这份契约文档 v2.0 的旧编号，且已冻结**——它们是取证当时的坐标，不是现行章节。
 > 换算表见 [`contract.md#appendix-oldrefs`](contract.md#appendix-oldrefs)；
-> 需要"现在这条规则在哪"时查 [`contract.md`](../contract.md)，需要"当时为什么这么定"时查 [`history.md`](../.AGENTS/history.md)。
+> 需要"现在这条规则在哪"时查 [`contract.md`](contract.md)，需要"当时为什么这么定"时查 [`history.md`](../.AGENTS/history.md)。
 
 ---
 

@@ -187,4 +187,5 @@ CC-BY-SA-4.0 的 ShareAlike 条件要求：若你分享改编自该手册的材�
 
 - 设计依据、决策记录与不变量：[`docs/contract.md`](docs/contract.md)（[`#knowledge`](docs/contract.md#knowledge) 知识库、[`#licensing`](docs/contract.md#licensing) 许可）
 - 上游事实取证：[`docs/upstream-facts-docs.md`](docs/upstream-facts-docs.md)、[`docs/upstream-facts-tools.md`](docs/upstream-facts-tools.md)
+- 交付状态与工作记忆：[`.AGENTS/README.md`](.AGENTS/README.md)
 - 本项目许可全文：[`LICENSE`](LICENSE)

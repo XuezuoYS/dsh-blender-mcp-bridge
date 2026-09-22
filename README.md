@@ -47,7 +47,7 @@ DSH  ⇐ 本插件  ⇐ TCP socket ⇒  Blender Add-on
 
 | 工具 | 性质 | 作用 |
 |---|---|---|
-| `blender_mcp_status` | 只读 | 握手、指纹、版本门控、**风险姿态**（文件路径 / 是否脏 / 距今 / 可用检查点 / 场景规模），并报告 `renderSettings` 与 `settingsDrift` |
+| `blender_mcp_status` | 只读 | 握手、指纹、版本门控、**风险姿态**（文件路径 / 是否脏 / 距今 / 可用检查点 / 场景规模 / 本轮是否已落检查点），并报告 `renderSettings`、`settingsDrift` 与**收尾清单 `sessionChecklist`**。可传 `task` 指定任务目录名 |
 | `blender_mcp_inspect` | 只读 | 结构化场景快照（集合、数据块计数、链接库、缺失引用、逐对象类型/父级/修改器/网格统计/材质） |
 | `blender_mcp_exec` | **写** | 唯一执行通道；过 L1 静态拦截、落检查点、装 L2 运行时护栏 |
 | `blender_mcp_capture` | 写盘（任务目录） | **视觉反馈**：视口 / 区域 / 整窗截图；改过的渲染设置会还原（I15） |
@@ -55,7 +55,9 @@ DSH  ⇐ 本插件  ⇐ TCP socket ⇒  Blender Add-on
 | `blender_mcp_docs` | 只读 | **内嵌知识库检索**：`api`（API 契约）/ `search`（全文）/ `rules`（策展规则）。纯离线、不写盘 |
 
 > ⚠️ **一次 `exec` 必须控制在 30 s 以内**（`responseTimeoutMs`）。实测：1920×1080 / 128 采样 + 合成器 ≈ 17 s 可过；
-> 256 采样单帧会超时。原因是 `INVOKE_DEFAULT` 在本通道下**同步阻塞**，deferred 分支实际不可达——
+> 256 采样单帧会超时。在这条通道上**唯一可靠的出图姿势是 `bpy.ops.render.render(write_still=True)`**
+> （同步 + 直写文件）；**裸 `render()` 会静默空转**——返回 `FINISHED` 却什么都没渲染（`Render Result` 为 0×0），
+> 而 `render('INVOKE_DEFAULT')` 是**异步**的（返回 `RUNNING_MODAL`，渲染任务可能在你这次 `exec` 返回之后才落盘）。
 > 详见 [`docs/blender-5.2-findings.md`](docs/blender-5.2-findings.md)。高采样出图请用 Blender 自己的 **F12**。
 >
 > `exec` 里的 Python **必须自己 `import bpy`**：命名空间没有默认绑定，漏写会得到**空 `result` 且不报错**。
@@ -84,6 +86,8 @@ DSH  ⇐ 本插件  ⇐ TCP socket ⇒  Blender Add-on
 **已知边界（必须知道）**：
 
 - L2 只检**主线程**（可配置）；补丁窗口是**同步 exec 期间**，窗口外的异步/延迟写不受约束。
+  返回体里的 `guard.window` 如实说明这次覆盖到哪结束，`guard.jobsRunning` 会列出仍在跑的后台任务
+  （例如异步渲染）——**它们的落盘在窗口之外，护栏看不到**。
 - `importlib.reload`、ctypes 直调 C、动态构造路径都能绕过 L2（L1 也解析不出来）。**「未命中」不等于安全。**
 - 可写范围**只有任务目录**；默认是**活动 `.blend` 文件所在目录**下的 `.dsh-blender-{task}/`
   （AGENTS.md 基础安全需要第 2 条）。可用 `taskRootMode: workspace` 改用会话工作区，
@@ -121,8 +125,33 @@ AI 看到的是结果、不是空位。最典型的翻车是——为了出预�
 它**不阻断**执行（阻断是 L1/L2 那层的事），目的是让"AI 改了你的设置"这件事
 出现在你能看到的地方，而不是等出图不对才发现。
 
-> 想自己核一遍：`node diagnostics/probeSettingsGuard.js`（11 项检查，含"故意改设置能否被抓到"，
+> 想自己核一遍：`node diagnostics/probeSettingsGuard.js`（含"故意改设置能否被抓到"，
 > 以及"探针自己有没有把你的设置改回去"——收尾会复核每个键与开局一致）。
+
+## 干完活会主动交接（不是等你发现）
+
+**被拒时**的接管话术一直都有（结构化拒绝 + `handoff` + `suggested_path`）。**顺利干完时**的交接
+同样是契约的一部分（I26）：
+
+| 字段 | 在哪 | 说什么 |
+|---|---|---|
+| `handoffHint` | `blender_mcp_exec` 每次返回 | 会话仍是 dirty 时明确提示：改动**没有保存**在用户文件里、可按 **Ctrl+Z** 逐步回退、要出图请按 **F12**、任务目录已保留 |
+| `sessionChecklist` | `blender_mcp_status` | `isDirty` / 任务目录 / 检查点份数 / 快照文件 / `nextSteps[]` |
+
+**为什么要有这个**：一次顺利的建模任务如果没人提醒，用户很容易以为"AI 已经把结果保存了"——
+而本插件**从不保存**他的文件。完成态的指引与拒绝态的指引是两件事，前者以前是缺的。
+
+## 场景整洁约定（AI 会被要求做的）
+
+插件的系统提示词里有一段 `场景整洁约定`，要求 AI 在建模时有意识地做组织，而不是堆一场景对象：
+
+- **集合分层**：按用途分组（结构 / 家具 / 植物 / 灯光 / 大气 / 相机…），不要 137 个对象全在 `Collection` 里；
+- **命名**：`<类别>_<角色>_<序号>`（例 `STR_Column_L_02`），而不是 `Cube.042`；
+- **布线**：可见几何**四边面优先**；三角/ngon 只允许留在隐藏的分布体或不可见封盖上；
+- **秩序**：灯光与体积雾**各自成组**并统一命名；空集合要删掉，不要留 `REF_Plates` 这种空壳。
+
+这是**软限制**（提示词层，不阻断执行），与"出图设置默认不动"同级。它不替你做美术决策，
+只是让"整洁"成为 AI 的默认行为而不是碰运气。
 
 ## 安装
 
@@ -188,6 +217,8 @@ dsh plugin --profile web add ./dsh-blender-mcp-bridge
           enabled: true
           keep: 3
           maxBytes: 0
+          # turn（默认）= 一轮一份；write = 每次 mutating 写各落一份（撤销/回滚点更细，占盘更多）
+          perTurn: turn
         # ---- 拦截层 ----
         intercept:
           enabled: true
@@ -209,7 +240,7 @@ dsh plugin --profile web add ./dsh-blender-mcp-bridge
 ### 每个键
 
 「接线」列说明当前代码是否真的读取了这个键——**`docs/contract.md#config` 里出现的键必须真的被读取**（I12），
-未接线的项在 [`STATUS.md`](STATUS.md) 里有明确待办，不会长期挂着。
+未接线的项在 [`.AGENTS/README.md`](.AGENTS/README.md) 里有明确待办，不会长期挂着。
 
 | 键 | 默认 | 取值 | 什么时候需要改 | 接线 |
 |---|---|---|---|---|
@@ -227,7 +258,8 @@ dsh plugin --profile web add ./dsh-blender-mcp-bridge
 | `taskRootMode` | `'blendFile'` | `blendFile` \| `workspace` | 任务目录放哪。`blendFile`（默认）= **活动 `.blend` 文件所在目录下**，产出与工程在一起；`workspace` = 会话工作区（⚠️ 见下方说明） | ✅ |
 | `checkpoint.enabled` | `true` | 布尔 | 关掉就没有"写前备份"（**不建议**） | ✅ |
 | `checkpoint.keep` | `3` | 1–20 | 保留几轮备份；大场景吃磁盘时调小 | ✅ |
-| `checkpoint.maxBytes` | `0` | ≥0 字节 | `0` = 不限；设了会在超限时**只告警**（不中断） | ✅ |
+| `checkpoint.maxBytes` | `0` | ≥0 字节 | `0` = 不限；设了之后**超限的旧检查点会在轮次结束时被优先回收**（不再只告警）。⚠️ 写前不删——先写第 n+1 份、轮次结束才回落，所以峰值是 `keep + 1` 份 | ✅ |
+| `checkpoint.perTurn` | `'turn'` | `turn` \| `write` | 检查点粒度。`turn`（默认）= 一轮一份，回滚是**整文件级**的；`write` = 每次 `mutating:true` 的写各落一份（`turn-{T}-{seq}.blend`），误删可回到更近的位置，代价是占盘与 `keep` 份数消耗都变多 | ✅ |
 | `intercept.enabled` | `true` | 布尔 | 关掉就没有越界写/删拦截（**不建议**） | ✅ |
 | `intercept.guardThreadScope` | `main` | `main` / `all` | `all` 会把非主线程的 I/O 也纳入检查，可能误伤后台渲染 | ✅ |
 | `knowledge.maxHits` | `8` | 1–50 | 单次检索返回几条 | ✅ |
@@ -291,18 +323,20 @@ Blender → 编辑 → 偏好设置 → 插件 → MCP → Port
           enabled: false
           keep: 3
           maxBytes: 0
+          perTurn: turn
 ```
 
-**4. 设 .blend 备份体积上限**（超了只告警）
+**5. 设 .blend 备份体积上限**（超限的旧检查点会在轮换时被优先回收）
 
 ```yaml
         checkpoint:
           enabled: true
           keep: 2
           maxBytes: 524288000   # 500 MB
+          perTurn: turn
 ```
 
-**5. 只想用只读工具**（临时排错时防止误改场景）
+**6. 只想用只读工具**（临时排错时防止误改场景）
 
 ```yaml
         expose:
@@ -314,7 +348,7 @@ Blender → 编辑 → 偏好设置 → 插件 → MCP → Port
           docs: true
 ```
 
-**6. 不把知识库检索工具挂进会话**（语料仍然随包内置）
+**7. 不把知识库检索工具挂进会话**（语料仍然随包内置）
 
 ```yaml
         expose:
@@ -338,8 +372,8 @@ Blender → 编辑 → 偏好设置 → 插件 → MCP → Port
 | 报 `YAMLException: end of the stream or a document separator is expected` | 补丁文件里用了 `//` 注释——**YAML 只认 `#`** | 把 `//` 改成 `#` |
 | 改了插件自带的 `cordis.patch.yml` 但没生效 | 那是默认值模板，安装时已被 profile 补丁层覆盖 | 改 **profile** 的 `cordis.patch.yml` |
 | 改了配置，但某个键回退成默认值 | 补丁层整行替换、不深合并，你漏写了该键 | 从上面「完整配置」整段复制 |
-| 启动即报 `ERR_MODULE_NOT_FOUND`，指向 `lib/…` | `lib/` 缺失（正常安装不会出现） | 重装，或看 [`STATUS.md`](STATUS.md) |
-| 工具面里看不到 `blender_mcp_*` | **工具面在会话启动时固定**，插件是运行期装的 | **重启 harness**（profile 已是 `patchReload: live`，重启后即生效） |
+| 启动即报 `ERR_MODULE_NOT_FOUND`，指向 `lib/…` | `lib/` 缺失（正常安装不会出现） | 重装，或看 [`.AGENTS/README.md`](.AGENTS/README.md) |
+| 工具面里看不到 `blender_mcp_*` | 插件没被加载：`dsh.profile.bundles` 里没有它，或 profile 的 `cordis.patch.yml` 只剩一条指向不存在节点的**死 `id` 行**（加载器不报错） | 用 `plugin_manager(install_bundle, …)` 重新装载。profile 已是 `patchReload: live`，**同一轮里就能调用，不用重启 harness**（实测：`install_bundle` 返回 `applied` 后立刻可见 6 个工具）。只有改 profile 的 `bundles` 列表或路径才需要重启 |
 | `status` 报 `port-not-listening` | add-on 没启动 / `online_access` 没开 / 端口不一致 | 见上面的「常见改法 1」 |
 | `blender_mcp_docs` 报 `available: false` | 内置索引缺失或损坏（这是**交付缺陷**，不是配置问题） | 重装，或运行 `node buildKnowledge.js build` |
 | `blender_mcp_docs` 返回里带 `drift` 警告 | 语料的 Blender 版本与你当前会话不同 | 用 `buildKnowledge.js` 重建索引，或接受提示 |
@@ -360,7 +394,9 @@ Blender → 编辑 → 偏好设置 → 插件 → MCP → Port
 
 ### 怎么用
 
-- **技能壳**：`skills/blender-mcp-knowledge/` 提供一个 DSH 技能，进入 Blender 任务时加载——内含常驻的「易错点小抄」与「什么时候必须查 API」的判定规则。
+- **技能**：插件在 `apply()` 时把 `skills/blender-mcp-knowledge/SKILL.md` **注册为运行时技能**
+  （`ctx.skills.register()`，`source: 'runtime'`），所以它会出现在会话技能目录里、可被技能机制按需加载。
+  `skill` 服务不可用时**只退回"文件仍在包里"**，不阻断插件加载。该文件也可以**直接读**（不装插件也能用）。
 - **工具**：`blender_mcp_docs` 三种 mode——`api`（按标识符取契约）、`search`（全文检索）、`rules`（规则条目）。
 - **不装插件也能查**：语料与索引就是普通文件，可以直接读：
 
@@ -404,7 +440,7 @@ node buildKnowledge.js verify    # 只校验指纹，不写任何文件
 
 ```sh
 pnpm check         # tsc --noEmit -p jsconfig.json；需要本地 node_modules 里有 DSH 类型
-pnpm test          # node:test：仓库一致性（13 项）+ 全语料审计（15 项），离线可跑
+pnpm test          # node:test：仓库一致性 + 全语料审计 + 报告条目回归，离线可跑（当前 57 项）
 ```
 
 **类型检查范围**：`index.js`、`lib/**/*.js`、`buildKnowledge.js`、`test/**/*.js`。
@@ -418,14 +454,14 @@ pnpm test          # node:test：仓库一致性（13 项）+ 全语料审计（
 
 | 文件 | 内容 |
 |---|---|
-| [`docs/contract.md`](docs/contract.md) | **契约、规则、不变量（I1–I25）的唯一权威来源** |
-| [`STATUS.md`](STATUS.md) | 交付与配置接线状态、实测门禁结果、**仍未验证**的项 |
-| [`docs/blender-5.2-findings.md`](docs/blender-5.2-findings.md) | **Blender 5.2 实测发现**：合成器/渲染 API 差异、deferred 不可达、Cycles 与体积雾 |
+| [`docs/contract.md`](docs/contract.md) | **契约、规则、不变量（I1–I27）的唯一权威来源** |
+| [`docs/blender-5.2-findings.md`](docs/blender-5.2-findings.md) | **Blender 5.2 实测发现**：渲染通道三态、合成器与几何节点的静默失败、Cycles 与体积雾、undo 不可观测 |
 | [`docs/architecture.md`](docs/architecture.md) | 架构与运行逻辑导读 + 生态里其它第三方插件的实现方式调研 |
 | [`docs/upstream-facts-tools.md`](docs/upstream-facts-tools.md) | 上游协议 / 工具契约 / 安全面 / 许可的逐条取证 |
 | [`docs/upstream-facts-docs.md`](docs/upstream-facts-docs.md) | 上游文档检索层（RST 解析与索引）的逐条取证 |
-| [`.AGENTS/`](.AGENTS/README.md) | **工作记忆**：迁入的红线、决策史、被证伪的旧结论、验证门禁 |
-| [`test/`](test/repo.test.js) | 离线门禁：仓库一致性 + 全语料审计（`pnpm test`） |
+| [`.AGENTS/README.md`](.AGENTS/README.md) | **单一入口**：实现进度、配置接线状态、实测结论、待实测项、维护纪律 |
+| [`.AGENTS/`](.AGENTS/README.md) | **工作记忆**：决策史、被证伪的旧结论、事故复盘、审计与报告记录、门禁怎么跑 |
+| [`test/`](test/repo.test.js) | 离线门禁：仓库一致性 + 全语料审计 + 报告逐条回归（`pnpm test`） |
 | [`AGENTS.md`](AGENTS.md) | AI 行为准则（基础安全需要、类型安全、注释风格、git 约束） |
 
 **引用约定**：外部文档引用 [`docs/contract.md`](docs/contract.md) 一律用锚点（如 [`#guard-ops-proxy`](docs/contract.md#guard-ops-proxy)）

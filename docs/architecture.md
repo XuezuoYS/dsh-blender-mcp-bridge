@@ -3,7 +3,7 @@
 > 本文梳理当前仓库的真实结构与运行路径。事实标注沿用 `contract.md`：**实测** / **源码** / **文档** / **规范**。
 > 若本文与 `contract.md` 冲突，以 `contract.md` 为准（本文是导读，不是规范）。
 >
-> 交付与接线状态以 [`STATUS.md`](../STATUS.md) 为准；Blender 侧的实测发现见
+> 交付与接线状态以 [`../.AGENTS/README.md`](../.AGENTS/README.md)（单一入口）为准；Blender 侧的实测发现见
 > [`blender-5.2-findings.md`](blender-5.2-findings.md)。
 
 ---
@@ -12,11 +12,14 @@
 
 | 类别 | 文件 | 是否交付 | 说明 |
 |---|---|---|---|
-| **插件本体** | `index.js`、`lib/*.js`（10 个）、`package.json`、`cordis.patch.yml`、`README.md`、`jsconfig.json`、`skills/`、`knowledge/` | ✅ **是** | 纯 JS、零运行时依赖、无构建步骤 |
-| **契约与文档** | `docs/contract.md`、`docs/blender-5.2-findings.md`、`STATUS.md`、`AGENTS.md` | ❌ | 契约、实测发现、交付状态、行为准则 |
-| **工作记忆** | `.AGENTS/*.md`（5 个） | ❌ | 迁入的红线、决策史、被证伪的旧结论、验证门禁 |
-| **入库门禁** | `test/*.test.js`（2 个） | ❌ | 离线可跑：仓库一致性 + 全语料审计 |
-| **临时探针** | `diagnostics/*.js`（8 个） | ❌ | 需实机 Blender，`.gitignore` 整体忽略 |
+| **插件本体** | `index.js`、`lib/*.js`（11 个）、`package.json`、`cordis.patch.yml`、`README.md`、`jsconfig.json`、`skills/`、`knowledge/` | ✅ **是** | 纯 JS、零运行时依赖、无构建步骤 |
+| **契约与文档** | `docs/contract.md`、`docs/architecture.md`、`docs/blender-5.2-findings.md`、`docs/upstream-facts-*.md`、`AGENTS.md`、`THIRD_PARTY_NOTICES.md` | ❌ | 契约、导读、实测发现、上游取证、行为准则、署名 |
+| **状态与工作记忆** | `.AGENTS/*.md` | ❌ | 交付状态（`README.md` 单一入口）、迁入的红线、决策史、被证伪的旧结论、审计与报告记录、验证门禁 |
+| **入库门禁** | `test/*.test.js`（3 个） | ❌ | 离线可跑：仓库一致性 + 全语料审计 + 报告逐条回归 |
+| **临时探针** | `diagnostics/*`（不入库） | ❌ | 需实机 Blender，`.gitignore` 整体忽略 |
+
+**根目录只保留三份规范类文档**（`AGENTS.md` / `README.md` / `THIRD_PARTY_NOTICES.md`）：
+交付状态已并入 `.AGENTS/README.md`，避免同一件事两处各写一份而漂移（守卫：`R7c`）。
 
 **没有 TypeScript 源码**：JS 文件全部手写，TypeScript 只以 `tsc --noEmit` 形式做类型检查（`jsconfig.json`），
 覆盖 `index.js`、`lib/**`、`buildKnowledge.js` 与 `test/**`（`pnpm check`）。
