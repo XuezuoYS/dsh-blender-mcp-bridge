@@ -1,0 +1,18 @@
+# node_modules 有**两种存在形式**，都不入库：
+#   1. 指向 DSH checkout 的 junction；
+#   2. `pnpm install` 装出来的虚拟商店（.pnpm、typescript 等开发依赖）。
+# 交付物是纯 JS + 零运行时依赖 + 无构建步骤，消费者不需要它们。
+node_modules/
+
+# 锁文件**要入库**（包管理一律用 pnpm，见 AGENTS.md §1.2），它只记录开发期类型检查工具链的确定版本。
+# 本文件里不列 pnpm-lock.yaml——若出现 package-lock.json / yarn.lock，那是别的包管理器留下的，应当删掉。
+
+# 探针的产出目录：探针会在这里建任务目录与检查点，属临时数据。
+diagnostics/
+
+# 探针在**仓库根**建的任务目录（.dsh-blender-{task}）。探针现在会自己回收，
+# 但异常中断会留下半个——留在那里就是交付树里的垃圾（见 docs/audit-2026-09-20-findings.md F15）。
+.dsh-blender-*/
+
+# 上游取证的临时目录（语料镜像 / 探针响应），设计期一次性产物。
+.tmp-blmcp/
