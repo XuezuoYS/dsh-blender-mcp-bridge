@@ -1,5 +1,7 @@
 # dsh-blender-mcp-bridge
 
+> 当前处于 dev 开发周期，代码与功能上破坏性变更无需做兼容和迁移
+
 此项目是对 Deepseek Harness（以下简称 DSH） 开发的插件，旨在包装与桥接 Blender MCP Add-on，使 DSH 上的模型可便捷对接接入当前用户工作的 Blender 以辅助创作，且满足基础安全需要。
 
 [DSH 仓库链接](https://github.com/deepseek-ai/deepseek-harness)
