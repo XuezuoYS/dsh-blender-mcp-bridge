@@ -200,6 +200,25 @@ async function main() {
 
   // ---- R4 锚点可解析 ----
   const defined = new Set([...contract.matchAll(/<a id="([^"]+)"/gu)].map(match => match[1]))
+  /**
+   * 列目录；目录不存在时返回空数组。
+   *
+   * **为什么必须容忍缺失**（本仓一次真实缺陷）：`diagnostics/` 被 `.gitignore` 整体忽略
+   * （探针不入库），所以**任何新克隆里都没有这个目录**——而这里原先无条件 `readdir('diagnostics')`，
+   * 于是门禁在别人机器上直接 `ENOENT` 崩掉（41 个用例只跑起来 1 个）。"门禁在作者机器上能跑"
+   * 不等于"仓库的门禁能跑"。缺目录是**正常状态**，不是错误。
+   *
+   * @param {string} dir 绝对路径。
+   * @returns {Promise<string[]>} 目录项名。
+   */
+  const listDirOrEmpty = async (dir) => {
+    try {
+      return await readdir(dir)
+    } catch {
+      return []
+    }
+  }
+
   /** @type {string[]} */
   const dangling = []
   // 引用形态统一为 `<路径>docs/contract.md#<锚点>`；占位符写成尖括号形式，
@@ -211,18 +230,18 @@ async function main() {
   // 根目录只认**规范类**文档：`STATUS.md` 已并入 `.AGENTS/README.md`，
   // 若将来又有人在根目录加一份 `*.md`，它不会自动进入受检集合——这正是想要的（白名单，不是通配）。
   for (const dir of ['', 'docs']) {
-    for (const name of await readdir(dir === '' ? ROOT : at(dir))) {
+    for (const name of await listDirOrEmpty(dir === '' ? ROOT : at(dir))) {
       if (dir === '' && !['README.md', 'AGENTS.md', 'THIRD_PARTY_NOTICES.md'].includes(name)) continue
       if (name.endsWith('.md') || name.endsWith('.js')) refFiles.push(dir === '' ? name : `docs/${name}`)
     }
   }
   for (const dir of ['lib', 'diagnostics', 'test']) {
-    for (const name of await readdir(at(dir))) {
+    for (const name of await listDirOrEmpty(at(dir))) {
       if (name.endsWith('.js') && !name.startsWith('.')) refFiles.push(`${dir}/${name}`)
     }
   }
   // `.AGENTS/` 的记忆文档同样引用契约锚点（它们由 docs/ 迁入），必须继续受检
-  for (const name of await readdir(at('.AGENTS'))) {
+  for (const name of await listDirOrEmpty(at('.AGENTS'))) {
     if (name.endsWith('.md')) refFiles.push(`.AGENTS/${name}`)
   }
   for (const file of refFiles) {
@@ -243,7 +262,8 @@ async function main() {
   /** @type {string[]} */
   const jsFiles = ['index.js', 'buildKnowledge.js']
   for (const dir of ['lib', 'diagnostics', 'test']) {
-    for (const name of await readdir(at(dir))) {
+    // 同上：`diagnostics/` 不入库，新克隆里没有它
+    for (const name of await listDirOrEmpty(at(dir))) {
       if (name.endsWith('.js')) jsFiles.push(`${dir}/${name}`)
     }
   }
