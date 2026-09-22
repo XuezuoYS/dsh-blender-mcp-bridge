@@ -66,6 +66,31 @@ node diagnostics/linkcheck.mjs            # **纯 Node**：文档里的相对链
 `sessionChecklist` / `checkpoint.perTurn` / `status.task`）都是**只增字段**，不会让旧用例失败，
 但复跑时应当把它们逐个补进断言——[`README.md`](README.md) §7.2 第 17 项登记了这件事。
 
+两条**实测须知**（都由本轮 commit 整理时的自查抓出来，值得固定成步骤）：
+
+- **`diagnostics/` 不入库，所以它在任何新克隆里都不存在**。判据枚举目录时必须容忍缺失：
+  `test/repo.test.js` 原先无条件 `readdir('diagnostics')`，门禁在别人机器上直接 `ENOENT` 崩掉
+  （41 个用例只跑起来 1 个）。**"在我机器上能跑"不等于"仓库的门禁能跑"。**
+- **行尾会随 `core.autocrlf` 变**（Git for Windows 默认 `true`）。任何按 `\n` 切分或按字节计数的
+  判据都会在 CRLF 检出下失效——而那些判据在 LF 工作区里**永远是绿的**，看不出问题。
+  `.gitattributes` 固定 `eol=lf` 只对**重新检出**生效，所以判据本身也必须对行尾不敏感。
+
+验证这两件事的固定做法（不必改全局 git 配置）：
+
+```sh
+# 模拟新克隆：没有 diagnostics/，也没有 node_modules
+git worktree add --detach --no-checkout /tmp/wt HEAD && cd /tmp/wt && git checkout HEAD -- .
+node --test                      # 应全绿；修复前 test/repo.test.js 会 ENOENT 崩掉
+
+# 模拟 CRLF 检出：把仓内文本文件整体转成 CRLF（.gitattributes 已让真检出是 LF，只能自己造）
+#   node -e "…把 *.js/*.json/*.yml/*.md/*.jsonl/*.rst 的 \n 换成 \r\n…"
+node --test                      # 应全绿；修复前 E1（字节数）与 R2a（/config:\n/）会红
+```
+
+> **为什么值得每次都做**：上面第二项当场暴露了**两个"假修复"**——E1 第一版按 `(?<!\r)\n`
+> 数展开量（在 CRLF 文件上只匹配段落末尾，严重低估），regression 的剥注释按 `\n` 切行
+> （行尾残留 `\r` 导致正则失配）。只看工作区里的绿灯，这两个缺陷会原样进仓库。
+
 两条实测须知：
 
 - **`probeCapabilities` 的"exec 只读"用例要求活动场景至少有一个物体**（断言 `result.n > 0`）。
