@@ -4629,12 +4629,12 @@
     "manual/render/shader_nodes/textures/brick.rst": "b00927594a820761960191bb3c34332a678c8346"
   },
   "builderVersion": "1.0.0",
-  "builtAt": "2026-09-19T16:09:25.714Z",
+  "builtAt": "2026-09-22T14:15:24.932Z",
   "blenderVersion": "5.2",
   "indexedFiles": 4139,
   "segments": 69122,
   "normalizedBytes": 14725671,
-  "indexBytes": 30795274,
+  "indexBytes": 30799578,
   "examplePyFiles": 112,
   "examplePyBytes": 184547,
   "unparsedDirectives": [
