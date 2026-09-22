@@ -1,0 +1,28 @@
+<!-- source: manual/compositing/types/utilities/vector/combine_spherical.rst -->
+
+.. --- copy below this line ---
+
+**********************
+
+figure: /images/node-types_GeometryNodeCombineSpherical.webp
+The *Combine Spherical* node converts spherical coordinates (R, Φ, Θ)
+into a Cartesian vector (X, Y, Z). It is the inverse of the
+:doc:`Separate Spherical </modeling/geometry_nodes/utilities/vector/separate_spherical>` node.
+
+Spherical coordinates represent a point in 3D space by its distance from the origin,
+horizontal rotation, and vertical inclination, which can be useful for constructing
+radial or rotational patterns and generating coordinates on a sphere.
+
+R
+The radial distance from the origin.
+
+Phi
+The azimuthal angle (horizontal rotation) around the Z axis.
+
+Theta
+The polar angle (vertical inclination) from the ground plane.
+
+Vector
+The resulting Cartesian vector corresponding to the input spherical coordinates.
+
+:start-after: .. --- copy below this line ---

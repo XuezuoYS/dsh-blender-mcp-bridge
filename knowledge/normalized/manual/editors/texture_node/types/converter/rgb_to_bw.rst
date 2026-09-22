@@ -1,0 +1,31 @@
+<!-- source: manual/editors/texture_node/types/converter/rgb_to_bw.rst -->
+
+.. _bpy.types.CompositorNodeRGBToBW:
+.. Editor's Note: This page gets copied into:
+.. - :doc:`</render/shader_nodes/color/rgb_to_bw>`
+.. - :doc:`</editors/texture_node/types/converter/rgb_to_bw>`
+
+.. --- copy below this line ---
+
+**************
+
+figure: /images/node-types_CompositorNodeRGBToBW.webp
+The *RGB to BW Node* makes a color image black-and-white by outputting its luminance.
+
+note: 
+You can directly connect Color sockets to Value sockets in node graphs,
+which also converts the image to black-and-white. As such, this node is
+not always necessary.
+
+Image
+Color image input.
+
+Value
+Grayscale value output.
+
+.. (TODO add) examples of why this might be useful
+
+.. _bpy.types.TextureNodeRGBToBW:
+.. DO NOT EDIT FILE. This is simply a stub which copies everything from the link below.
+
+:start-after: .. --- copy below this line ---

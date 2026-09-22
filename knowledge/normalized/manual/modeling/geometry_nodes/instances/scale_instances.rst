@@ -1,0 +1,33 @@
+<!-- source: manual/modeling/geometry_nodes/instances/scale_instances.rst -->
+
+.. _bpy.types.GeometryNodeScaleInstances:
+
+********************
+
+figure: /images/node-types_GeometryNodeScaleInstances.webp
+The *Scale Instances* node scales geometry instances in local or global space.
+
+The :doc:`/modeling/geometry_nodes/instances` page contains more information about geometry instances.
+
+Instances
+Standard geometry input.
+
+Selection
+Boolean field used to determine if an instance will be scaled.
+
+Scale
+The scale factor to apply to the instance's transform on each axis.
+
+Center
+The position from which the instance origins are scaled. Each instance will move away from this location.
+When the *Local Space* input is enabled, this location is relative to the initial transform
+of each instance.
+
+Local Space
+If enabled, the instances are scaled in local space. In other words,
+they are scaled in the directions the described by the initial transform of each instance.
+When the input is disabled, the *Center* and *Scale* inputs are specified in
+the local space of the modifier object.
+
+Instances
+Standard geometry output.
