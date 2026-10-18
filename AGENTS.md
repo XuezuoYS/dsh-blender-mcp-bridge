@@ -18,6 +18,8 @@ Blender 官方 MCP 服务器在安全性和实现效果方面均烂的要死，d
 
 > 需要与 dsh-blender 插件共存兼容。
 
+[dsh-blender](https://github.com/CheshireJCat/blender)
+
 ### 基础安全需要
 
 此插件有基础安全要求，需要在提示词提示 AI 且拦截 AI 危险行为。以下为细则：
