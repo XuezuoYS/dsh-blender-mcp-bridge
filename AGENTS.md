@@ -2,7 +2,9 @@
 
 > 当前处于 dev 开发周期，代码与功能上破坏性变更无需做兼容和迁移
 
-此项目是对 Deepseek Harness（以下简称 DSH） 开发的插件，旨在包装与桥接 Blender MCP Add-on，使 DSH 上的模型可便捷对接接入当前用户工作的 Blender 以辅助创作，且满足基础安全需要。
+此项目是对 Deepseek Harness（以下简称 DSH） 开发的插件，旨在包装与桥接 Blender MCP Add-on，使 DSH 上的模型可便捷对接接入当前用户工作中的 Blender 以辅助创作，且满足基础安全需要。
+
+目标兼容 DSH 最新 rc 版本。
 
 [DSH 仓库链接](https://github.com/deepseek-ai/deepseek-harness)
 
@@ -20,17 +22,20 @@
 
 ### 知识库
 
-本项目知识库为迁移转译自 blender 官方提供的 MCP Server 内置的知识库。
+本项目知识库直接让 AI 去看官方文档，网址为 https://docs.blender.org/manual/zh-hans/5.2/# 其中5.2是对应的版本号，提供给 AI 时自动识别当前打开的 Blender 版本并拼合
 
 ## 工作约束
 
-### 工作记忆
+为保证安全、可靠的与人类开发者协同开发，你需要遵守以下规范：
 
-在本项目根目录创建 `.AGENTS` 文件夹，需自动整理记录重要记忆为 md。
-
-### 类型安全
-
-本项目为全 js 写，但引用 typescript 库进行类型安全校验
+- 命名风格：对于函数名、变量名、文件名，默认使用小驼峰 `camelCase` 命名，对于类名，默认使用大驼峰 `PascalCase` 命名。
+- 请尽可能保持代码的**模块化、高可维护性、少冗余代码、架构与代码层面低耦合**，若用户无要求，在不影响**模块化、高可维护性、少冗余代码、架构与代码层面低耦合**的前提下，执行*最小修改面*。
+- 你需要严谨按照要求和约束，若你对于任意问题不确定、未知或拿不准，认为我的要求模糊的，请先向我提问后得到准确回答后再进行。
+- 在 `.agents/` 文件夹（若无请自行创建）下储存 Agent 工作用临时文档、文件和给 AI 查阅的备忘和内容，与 `docs/` 内的文档产生冲突时，以 `docs/` 标准要求。
+- `.agents/` 下的 Agent 工作文件在工作完成后需整理、压缩、归档入日期文件名。
+- 为保证可维护性，`docs/` 与 `.agents/` 下的文档应保持简洁、通俗、口语化，禁止使用少见、偏僻、翻译腔、AI 常用的难读术语，**全部文档应高效优雅**且便于人类程序员理解，语言风格符合 `AGENTS.md`。
+- 未经明确允许，禁止进行 Git 操作。
+- 未经明确允许，禁止修改 `AGENTS.md`。
 
 ### 注释
 
@@ -73,28 +78,6 @@ export class AClass {
     static aStaticMethod() {}
 }
 ```
-
-注意：
-
-1. 类说明必须**紧贴 `export class X {`**，中间只允许空行；一旦隔了 `import`、常量、
-   `@typedef` 块或任何函数，那段注释就归了别的节点，类 hover 为空（方法不受影响，
-   因为每个方法上方就是它自己那段 JSDoc）。
-2. 文件级说明写成 `/** @fileoverview … */`（或普通 `//` 注释）；`@fileoverview` 块**也不能紧贴 class**，紧贴时它会顶掉类注释。
-3. `@typedef` / `@property` 一律独立成块，不与类描述同块：同块时整块被 typedef 认领，
-   类 hover 为空。只能拆块，不能删（删了会丢类型并抬高 `pnpm check` 诊断数）。
-
-
-### 许可与 SPDX
-
-本项目以 **`GPL-3.0-or-later`** 分发（内联上游语料即再分发）。完整条款见 [`LICENSE`](LICENSE)，
-上游来源、版本与修改声明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
-
-- 新写的 `.js` **首行**必须是 `// SPDX-License-Identifier: GPL-3.0-or-later`
-  （判定规则：第一行含字面量 `SPDX`）。
-- `package.json` 的 `files` 里不得列不存在的路径，也不得提前声明尚未实现的交付物。
-- 语料两部分许可不同：`knowledge/source/api/` 随上游为 GPL-3.0-or-later，
-  `knowledge/source/manual/` 是 **CC-BY-SA-4.0**（署名 `Blender Documentation Team`）；
-  按**更严格的一方**履行（两者都署名）。细节留在 `THIRD_PARTY_NOTICES.md`。
 
 ### git
 
