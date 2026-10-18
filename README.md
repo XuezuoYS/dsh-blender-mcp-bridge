@@ -13,8 +13,6 @@ DeepSeek Harness（DSH）的 Blender 活会话桥插件：直接连用户当前�
 - 安装：隔离 profile 里 `--dump-config` / `--dump-config-schema` 均能加载本插件。
 - 未实测项：`dsh-blender` 共存（本机未安装），工具名与提示词分工已核对。
 
-详细证据见 [验收记录](docs/验收记录.md)。
-
 ## 运行前提
 
 - DSH `0.2.1-rc.2`（`engines.dsh` 精确 pin）。
@@ -126,12 +124,9 @@ node diagnostics/probeLive.js           # M0 实机全量探针（会短暂加/�
 
 ## 文档
 
-- [可行性评估](docs/可行性评估.md)
-- [技术路线](docs/技术路线.md)
+- [已知问题与改进建议](docs/knownIssues.md)
 - [Helper 运行时](docs/helper-runtime.md)
 - [create-3d-model 技能引用](docs/refer-create-3d-model.md)
-- [二次评审与实施计划](docs/二次评审与实施计划.md)
-- [验收记录](docs/验收记录.md)
 
 ## 第三方引用
 
