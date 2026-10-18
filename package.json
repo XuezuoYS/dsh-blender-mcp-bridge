@@ -1,0 +1,51 @@
+{
+  "name": "dsh-blender-mcp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bridge DSH to the user's live Blender session through the official mcp add-on socket: undoable, auditable, never saves the user's .blend.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.1-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5"
+  },
+  "scripts": {
+    "check": "tsc --noEmit -p jsconfig.json",
+    "test": "node --test",
+    "probe": "node diagnostics/probePreflight.js",
+    "probe:syntax": "node diagnostics/probePythonSyntax.js",
+    "probe:guard": "node diagnostics/probeGuardOffline.js",
+    "probe:live": "node diagnostics/probeLive.js"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "types",
+    "helpers",
+    "cordis.patch.yml",
+    "requirements-analysis.txt",
+    "scripts",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

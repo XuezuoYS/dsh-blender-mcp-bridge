@@ -1,0 +1,97 @@
+<!--
+Adapted from CheshireJCat/create-3d-model-skill `skills/create-3d-model/`
+(MIT, Copyright (c) 2026 CheshireJCat), which preserves modules from
+RobLe3/cc-blender-skill (release 1.3.0, commit 11016c9a..., MIT,
+Copyright (c) 2026 RobLe3).
+Changes: BlenderMCP/Codex tool names mapped to blender_mcp_*; save flow
+replaced by task-dir snapshots + Ctrl+Z; live-session safety rules;
+English-only; helper scripts exposed through blender_mcp_helper.
+This is a self-curated adaptation, not an official subset.
+-->
+
+# Blender Live Session
+
+Work inside the user's **currently open Blender session** through the
+`blender_mcp_*` tools. The session may contain unsaved work: never save the
+`.blend`, never open another file, never quit Blender, never change
+preferences. Those operations are blocked by the plugin.
+
+## Ground rules
+
+1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`.
+2. **One undo step per `blender_mcp_exec`**: tell the user `Ctrl+Z` steps back.
+3. **Write only under the task directory** (`.dsh-blender-<task>` next to the
+   `.blend`). Blocked writes return `suggestedPath`; do not retry the same path.
+4. **Do not change render settings on your own.** Preview renders use the exact
+   width/height/samples the user gave (`blender_mcp_render` restores settings).
+5. **Never roll back.** If something looks wrong (blocked write, `.blend`
+   changed on disk, timeout, guard self-check failure, broken scene), stop, tell
+   the user what happened with the snapshot path, and end the turn. The user
+   decides whether to undo or open a snapshot.
+6. **Visual validation**: capture (`blender_mcp_capture`) or render
+   (`blender_mcp_render`) after a blockout and before claiming completion. A
+   non-empty image file is not visual validation; look at it.
+7. **Manual**: when unsure about an API, read `status.docs.manualEn`.
+
+## Workflow
+
+### 1. Establish the target
+
+Classify the input: text, one image, multiview/orthographic, wireframe, texture
+pack, or an existing asset. Record subject, dimensions, style, delivery format,
+and unknowns. For one image, state depth/scale/occlusion assumptions.
+
+### 2. Plan before mutating
+
+Define units, orientation, object boundaries, stable names, collection
+ownership, modifier strategy, and validation views. Prefer creating a
+task-specific collection; leave unrelated objects alone.
+
+### 3. Blockout to detail
+
+Build silhouette and proportions with the fewest primitives, capture a
+screenshot, fix scale/orientation/framing, then add detail. Prefer `bpy.data`
+and `bmesh` over operators; when using operators, set active object, selection
+and mode explicitly. Split work into small retryable chunks and print compact
+evidence (`result = {...}`).
+
+### 4. Validate
+
+After each phase verify names, transforms, dimensions, parents, modifiers,
+topology counts, materials and accidental duplicates. Inspect a screenshot
+after the blockout and a render before calling the model finished.
+
+### 5. Snapshots and handoff
+
+The plugin snapshots automatically before the first write of a turn. Take an
+extra one with `blender_mcp_snapshot` before a risky step. Files and reports go
+under the task directory. End by telling the user what changed, how to undo it,
+and where the artifacts are.
+
+## Tool mapping
+
+| Upstream tool | Use here |
+|---|---|
+| `get_scene_info` / `get_object_info` | `blender_mcp_inspect` |
+| `execute_blender_code` | `blender_mcp_exec` |
+| `get_viewport_screenshot` | `blender_mcp_capture` |
+| save versioned `.blend` | snapshots + `Ctrl+Z`; never save |
+| analysis/validation helpers | `blender_mcp_helpers` + `blender_mcp_helper` |
+
+## Helpers
+
+`blender_mcp_helpers` lists 23 regular helpers (3 maintenance helpers stay
+hidden unless enabled). Arguments are validated against the catalog; inputs
+must be in the workspace, the `.blend` directory or the task directory;
+outputs land in the task directory. Read the helper result and inspect any
+image output.
+
+## References
+
+- `references/visual-validation.md`: image inspection gates and correction loop.
+- `references/core/assembly-order.md`: phased production order.
+- `references/modeling-patterns.md`: coordinates, naming, topology, modifier order.
+- `references/core/common-object-dimensions.md`: real-world size table.
+- `references/blender-5-compat.md`: Blender 5.x API notes.
+- `references/capability-map.md`: upstream module map (domain modules not
+  shipped in v1; use the helper tools and the manual instead).

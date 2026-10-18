@@ -1,2 +1,13 @@
 # Local agent working notes: not part of the repository.
 .agents/
+
+# Local tooling and build artifacts.
+node_modules/
+.venv/
+pnpm-debug.log
+
+# Live probes need a running Blender; they stay local (see docs 技术路线 §12).
+diagnostics/
+
+# Blender backup files produced by manual testing.
+*.blend1
