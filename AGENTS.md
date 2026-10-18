@@ -30,7 +30,7 @@ Blender 官方 MCP 服务器在安全性和实现效果方面均烂的要死，d
 
 ### 知识库
 
-本项目知识库直接让 AI 去看官方文档，网址为 https://docs.blender.org/manual/zh-hans/5.2/# 其中5.2是对应的版本号，提供给 AI 时自动识别当前打开的 Blender 版本并拼合
+本项目知识库直接让 AI 去看官方文档，网址为 https://docs.blender.org/manual/en/5.2/# 其中5.2是对应的版本号，提供给 AI 时自动识别当前打开的 Blender 版本并拼合
 
 ## 工作约束
 
