@@ -3,13 +3,14 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import {
   ensureTaskDir,
   isInsideTask,
+  listSnapshots,
   listTaskDirs,
   MARKER_FILE,
   resolveTaskRoot,
@@ -66,6 +67,15 @@ test('listTaskDirs reports markers and snapshot counts without creating anything
   assert.equal(listed[0].name, task.name)
   assert.equal(listed[0].marker?.sessionId, 's1')
   assert.equal(listed[0].snapshots, 0)
+})
+
+test('listSnapshots orders by numeric generation', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-task-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  for (const name of ['2-001.blend', '10-001.blend', '9-001.blend']) {
+    await writeFile(path.join(task.dir, 'snapshots', name), 'x')
+  }
+  assert.deepEqual(await listSnapshots(task.dir), ['2-001.blend', '9-001.blend', '10-001.blend'])
 })
 
 test('isInsideTask stops at the directory boundary', () => {

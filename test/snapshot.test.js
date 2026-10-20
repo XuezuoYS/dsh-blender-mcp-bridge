@@ -15,6 +15,19 @@ test('snapshot names sort by generation', () => {
   assert.ok(snapshotFileName(3, 10) > snapshotFileName(3, 9))
 })
 
+test('rotation keeps the newest generations after turn 10', () => {
+  const names = [1, 2, 9, 10, 11].map((turn) => snapshotFileName(turn, 1))
+  // Feed them unsorted on purpose: rotation must sort by (turn, seq) itself.
+  assert.deepEqual(
+    planRotation([...names].reverse(), 3),
+    [1, 2, 9].map((turn) => snapshotFileName(turn, 1)),
+  )
+  assert.deepEqual(planRotation(['1-001.blend', '10-001.blend', '2-001.blend', '9-001.blend'], 3), [
+    '1-001.blend',
+    '2-001.blend',
+  ])
+})
+
 test('rotation writes first and drops the oldest generation', () => {
   assert.deepEqual(planRotation([], 3), [])
   assert.deepEqual(planRotation(['1-001.blend'], 3), [])
@@ -67,6 +80,28 @@ test('createSnapshot writes the file and rotates after success', async () => {
     ['1-001.blend'],
   )
   assert.equal(await readFile(result.path, 'utf8'), 'BLEND')
+})
+
+test('createSnapshot rotates the oldest turn, not the lexically first name', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-snap-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  const snapshotsDir = path.join(task.dir, 'snapshots')
+  for (const name of ['8-008.blend', '9-009.blend', '10-010.blend']) {
+    await writeFile(path.join(snapshotsDir, name), 'old')
+  }
+
+  const result = await createSnapshot({
+    taskDir: task.dir,
+    turn: 11,
+    seq: 11,
+    send: fakeSnapshotSender(),
+    compress: true,
+    generations: 3,
+    timeoutMs: 1000,
+  })
+
+  assert.equal(result.name, '11-011.blend')
+  assert.deepEqual(result.removed.map((entry) => path.basename(entry)), ['8-008.blend'])
 })
 
 test('a failed snapshot is refused loudly', async () => {
