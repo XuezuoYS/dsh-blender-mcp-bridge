@@ -10,6 +10,7 @@ import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { ProtocolError } from '../lib/protocol.js'
 import { makeTools } from '../lib/tools.js'
 
 /** @typedef {{ name: string, execute: (args: any, exec: any) => Promise<any>, output?: { render: (args: any, value: any) => any[] } }} ToolLike */
@@ -85,15 +86,27 @@ function pngStub(width, height) {
  * @param {boolean} [setup.timeoutWarning] - report a stale timeout note
  * @param {boolean} [setup.noBlender] - fail the transport, proving it is unused
  * @param {string} [setup.knownFilePath] - last known .blend path for Python helpers
- * @returns {{ tools: ToolLike[], sent: string[], snapshotFiles: string[] }} bridge pieces
+ * @param {boolean} [setup.timeoutOnExec] - make the exec request time out
+ * @param {boolean} [setup.probeUnreachable] - make the liveness probe fail to connect
+ * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[] }} bridge pieces
  */
 function makeBridge(setup) {
   /** @type {string[]} */
   const sent = []
+  /** @type {Record<string, unknown>[]} */
+  const sentOptions = []
   /** @type {string[]} */
   const snapshotFiles = []
-  const send = async (/** @type {string} */ code) => {
+  const send = async (/** @type {string} */ code, /** @type {Record<string, unknown>} */ options = {}) => {
     sent.push(code)
+    sentOptions.push(options)
+    if (code.includes('"ping"')) {
+      if (setup.probeUnreachable === true) throw new ProtocolError('connect-refused', 'probe refused')
+      return { response: { status: 'ok', result: { ping: true } } }
+    }
+    if (setup.timeoutOnExec === true && code.includes('<dsh-user-code>')) {
+      throw new ProtocolError('response-timeout', 'exec timed out')
+    }
     if (setup.noBlender === true) throw new Error('transport should not be used')
     if (code.includes('versionMajorMinor')) {
       return { response: handshakeEnvelope(setup.blendPath, setup.background === true) }
@@ -183,7 +196,7 @@ function makeBridge(setup) {
     helperMaxOutputChars: 200000,
     enableMaintenanceHelpers: false,
   }
-  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, snapshotFiles }
+  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, sentOptions, snapshotFiles }
 }
 
 async function makeProject() {
@@ -327,6 +340,20 @@ test('render passes explicit settings and returns the real dimensions', async ()
   assert.equal(value.engine, 'BLENDER_EEVEE')
 })
 
+test('render uses the live scene settings when dimensions are omitted', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const renderTool = tools.find((tool) => tool.name === 'blender_mcp_render')
+  assert.ok(renderTool)
+
+  const value = await renderTool.execute({ task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'ok')
+  assert.equal(value.width, 1920)
+  assert.equal(value.height, 1080)
+  assert.equal(value.samples, 64)
+  assert.ok(sent.some((code) => code.includes('resolution_x = 1920') && code.includes('taa_render_samples = 64')))
+})
+
 test('render rejects out-of-range dimensions before touching Blender', async () => {
   const { blendPath, root } = await makeProject()
   const { tools } = makeBridge({ blendPath, workspaceDir: root })
@@ -405,6 +432,18 @@ test('status reports the live facts and lists task directories', async () => {
   assert.ok(String(blocks[0].text).includes('docs.blender.org'))
 })
 
+test('status warns when autosave moves the .blend path', async () => {
+  const { blendPath, root } = await makeProject()
+  const oldPath = path.join(root, 'old', 'scene.blend')
+  const { tools } = makeBridge({ blendPath, workspaceDir: root, knownFilePath: oldPath })
+  const statusTool = tools.find((tool) => tool.name === 'blender_mcp_status')
+  assert.ok(statusTool)
+
+  const value = await statusTool.execute({}, { agent: { session: { id: 's1' } } })
+  assert.equal(value.connected, true)
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('path changed')))
+})
+
 test('capture refuses background mode with a clear reason', async () => {
   const { blendPath, root } = await makeProject()
   const { tools } = makeBridge({ blendPath, workspaceDir: root, background: true })
@@ -414,6 +453,55 @@ test('capture refuses background mode with a clear reason', async () => {
   const value = await captureTool.execute({ task: 'lamp' }, { agent: { session: { id: 's1' } } })
   assert.equal(value.status, 'error')
   assert.equal(value.error.kind, 'background-mode')
+})
+
+test('exec accepts a batch and pushes only one undo step', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute(
+    { task: 'lamp', batch: ['result = {"a": 1}', 'result = {"b": 2}'] },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.equal(value.status, 'ok')
+  const payload = sent.find((code) => code.includes('_dsh_batch_steps'))
+  assert.ok(payload, 'batch payload missing')
+  assert.equal((payload.match(/bpy\.ops\.ed\.undo_push/g) ?? []).length, 1)
+})
+
+test('exec passes a per-call timeout to the transport', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sentOptions } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp', timeoutMs: 1234 }, { agent: { session: { id: 's1' } } })
+  assert.ok(sentOptions.some((options) => options.responseTimeoutMs === 1234))
+})
+
+test('a timed-out exec reports Blender unreachable when the probe cannot connect', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root, timeoutOnExec: true, probeUnreachable: true })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'error')
+  assert.equal(value.error.kind, 'blender-unreachable')
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('crash')))
+})
+
+test('a timed-out exec stays timeout when the probe answers', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root, timeoutOnExec: true })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'timeout')
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('crash')))
 })
 
 test('a stale timeout note shows up as a warning on the next exec', async () => {

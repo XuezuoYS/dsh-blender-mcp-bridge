@@ -20,7 +20,8 @@ guard, not a sandbox.
 ## Ground rules
 
 1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`.
-2. **One undo step per `blender_mcp_exec`**: the plugin pushes it; code that
+2. **One undo step per `blender_mcp_exec`**: the plugin pushes it; use the
+   `batch` array to run several snippets under one snapshot/undo step; code that
    pushes its own undo steps can add more. Tell the user `Ctrl+Z` steps back.
 3. **Write only under the task directory** (`.dsh-blender-<task>` next to the
    `.blend`); OS temp files are allowed for scratch work. Blocked writes return
