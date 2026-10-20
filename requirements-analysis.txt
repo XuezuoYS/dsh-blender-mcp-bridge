@@ -1,0 +1,7 @@
+# Analysis dependencies for helpers/ (Pillow / NumPy / OpenCV / SciPy).
+# Install with: node scripts/setupAnalysis.js
+# Version ranges mirror docs/helper-runtime.md section 3.1.
+numpy>=2.0,<3
+Pillow>=10,<13
+opencv-python-headless>=4.10,<5
+scipy>=1.13,<2
