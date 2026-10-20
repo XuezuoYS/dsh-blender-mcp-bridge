@@ -84,6 +84,7 @@ function pngStub(width, height) {
  * @param {boolean} [setup.background] - handshake reports background mode
  * @param {boolean} [setup.timeoutWarning] - report a stale timeout note
  * @param {boolean} [setup.noBlender] - fail the transport, proving it is unused
+ * @param {string} [setup.knownFilePath] - last known .blend path for Python helpers
  * @returns {{ tools: ToolLike[], sent: string[], snapshotFiles: string[] }} bridge pieces
  */
 function makeBridge(setup) {
@@ -163,6 +164,8 @@ function makeBridge(setup) {
     send,
     warn() {},
     resolveSession: () => ({ sessionId: 's1', workspaceDir: setup.workspaceDir, turn: 3 }),
+    knownFilePath: () => setup.knownFilePath ?? '',
+    noteFilePath() {},
     snapshotState: {
       shouldSnapshot: () => setup.snapshotEnabled !== false,
       markSnapshot() {},
@@ -537,4 +540,25 @@ test('a guard self-check exception is surfaced', async () => {
   const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
   assert.equal(value.status, 'error')
   assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('self-check threw')))
+})
+
+test('a Python helper reuses the last known .blend directory', async () => {
+  const { blendDir, blendPath, root } = await makeProject()
+  const workspaceDir = path.join(root, 'ws')
+  await mkdir(workspaceDir, { recursive: true })
+  await writeFile(path.join(blendDir, 'fit.json'), '{"fit": {}}', 'utf8')
+  const { tools } = makeBridge({ blendPath, workspaceDir, knownFilePath: blendPath })
+  const helperTool = tools.find((tool) => tool.name === 'blender_mcp_helper')
+  assert.ok(helperTool)
+
+  const value = await helperTool.execute(
+    {
+      name: 'fit-repair-queue',
+      task: 'lamp',
+      args: { 'fit-report': path.join(blendDir, 'fit.json') },
+    },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.equal(value.status, 'ok')
+  await access(path.join(blendDir, '.dsh-blender-lamp', 'outputs', 'fit-repair-queue-out.json'))
 })

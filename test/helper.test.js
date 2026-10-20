@@ -101,6 +101,60 @@ test('negative numeric helper values are allowed', async () => {
   assert.equal(argv[argv.indexOf('--min-area') + 1], '-1')
 })
 
+test('out-dir parameters get a default under the task directory', async () => {
+  const taskDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
+  for (const name of ['seeded-part-masks', 'segment-source-parts']) {
+    const helper = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper(name))
+    const args = name === 'seeded-part-masks' ? { manifest: 'm.json' } : { image: 'a.png' }
+    const { argv, outputs } = await buildHelperCommand(helper, args, taskDir)
+    assert.ok(argv.includes('--out-dir'))
+    const outDir = outputs.find((output) => output.kind === 'out-dir')
+    assert.ok(outDir)
+    assert.ok(outDir.path.startsWith(taskDir))
+    assert.ok(existsSync(outDir.path))
+  }
+})
+
+test('multiview helper exposes per-view inputs and writes overlays into the task dir', async () => {
+  const taskDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
+  const helper = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('multiview-fit-report'))
+  const { argv, outputs } = await buildHelperCommand(
+    helper,
+    { 'front-template': 'ref.png', 'front-render': 'render.png' },
+    taskDir,
+  )
+  assert.ok(argv.includes('--front-template'))
+  assert.ok(argv.includes('--front-render'))
+  const overlay = outputs.find((output) => output.param === 'overlay-dir')
+  assert.ok(overlay)
+  assert.equal(overlay.kind, 'out-dir')
+  assert.ok(overlay.path.startsWith(taskDir))
+})
+
+test('a failed Python helper keeps stderr in the error', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
+  const workspaceDir = path.join(root, 'workspace')
+  const blendDir = path.join(root, 'project')
+  await mkdir(workspaceDir, { recursive: true })
+  await mkdir(blendDir, { recursive: true })
+  await writeFile(path.join(workspaceDir, 'bad.json'), 'not json', 'utf8')
+  const taskDirInfo = await ensureTaskDir({ root: blendDir, task: 'lamp', sessionId: 's1' })
+  const helper = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('fit-repair-queue'))
+
+  const result = await runPythonHelper({
+    helper,
+    args: { 'fit-report': 'bad.json', out: 'queue.json' },
+    roots: { workspaceDir, blendDir, taskDir: taskDirInfo.dir },
+    helpersDir: HELPERS_DIR,
+    pythonConfig: { analysisPython: '', autoDetectPython: true },
+    timeoutMs: 30000,
+    maxOutputChars: 100000,
+  })
+  assert.equal(result.status, 'error')
+  const error = /** @type {{ message?: string }} */ (result.error)
+  assert.ok(error.message && error.message.length > 0)
+})
+
 test('a pure-Python helper runs end to end and writes inside the task directory', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
   const workspaceDir = path.join(root, 'workspace')

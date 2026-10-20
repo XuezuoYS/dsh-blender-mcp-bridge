@@ -24,6 +24,13 @@ test('a Python 3.10+ interpreter is found and cached', async () => {
   assert.ok(major > 3 || (major === 3 && minor >= 10), `unexpected Python ${first.version}`)
 })
 
+test('modules are probed independently across dependency sets', async () => {
+  const python = await resolvePython(PYTHON_CONFIG)
+  await missingDependencies(python, ['json'])
+  const second = await missingDependencies(python, ['math'])
+  assert.deepEqual(second, [])
+})
+
 test('dependency probing reports unknown packages as missing', async () => {
   const python = await resolvePython(PYTHON_CONFIG)
   const missing = await missingDependencies(python, ['definitely-not-a-package'])

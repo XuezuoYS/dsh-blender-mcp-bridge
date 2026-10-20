@@ -86,6 +86,8 @@ export function apply(ctx, config) {
   const snapshotTaken = new Set()
   /** @type {Set<string>} session ids with a timing-out call that lost its reply */
   const timeoutNotes = new Set()
+  /** @type {Map<string, string>} session id -> last known .blend path */
+  const knownFilePaths = new Map()
 
   /**
    * @param {string} sessionId - session id
@@ -252,6 +254,10 @@ export function apply(ctx, config) {
     resolveSession,
     imageSupport,
     attachImage,
+    knownFilePath: (sessionId) => knownFilePaths.get(sessionId) ?? '',
+    noteFilePath: (sessionId, filePath) => {
+      if (typeof filePath === 'string' && filePath !== '') knownFilePaths.set(sessionId, filePath)
+    },
     timeoutWarning: (sessionId) => timeoutNotes.has(sessionId),
     noteTimeout: (sessionId) => {
       timeoutNotes.add(sessionId)
