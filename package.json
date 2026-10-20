@@ -1,7 +1,7 @@
 {
   "name": "dsh-blender-mcp-bridge",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Bridge DSH to the user's live Blender session through the official mcp add-on socket: undoable, auditable, never saves the user's .blend.",
   "type": "module",
   "main": "index.js",
