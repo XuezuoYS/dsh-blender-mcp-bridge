@@ -352,12 +352,43 @@ test('exec reports the objects added by the call', async () => {
   assert.equal(value.changes.delta, 1)
 })
 
+test('exec render shows the traceback tail', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    snapshotEnabled: false,
+    execResult: () => ({
+      status: 'error',
+      result: {},
+      undo: { pushed: true },
+      guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+      error: {
+        message: 'IndexError: tuple index out of range',
+        traceback:
+          'Traceback (most recent call last):\n  File "<dsh-user-code>", line 3, in <module>\nIndexError: tuple index out of range',
+      },
+      warnings: [],
+    }),
+  })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+  assert.ok(execTool.output)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'error')
+  const blocks = execTool.output.render({}, value)
+  assert.ok(String(blocks[0].text).includes('Traceback (tail):'))
+  assert.ok(String(blocks[0].text).includes('<dsh-user-code>'))
+})
+
 test('status reports the live facts and lists task directories', async () => {
   const { blendDir, blendPath, root } = await makeProject()
   const { tools } = makeBridge({ blendPath, workspaceDir: root })
   const statusTool = tools.find((tool) => tool.name === 'blender_mcp_status')
   const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
   assert.ok(statusTool)
+  assert.ok(statusTool.output)
   assert.ok(execTool)
 
   await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
@@ -367,6 +398,8 @@ test('status reports the live facts and lists task directories', async () => {
   assert.equal(value.taskDirs.length, 1)
   assert.equal(value.taskDirs[0].name, '.dsh-blender-lamp')
   assert.equal(value.taskDirs[0].snapshots, 1)
+  const blocks = statusTool.output.render({}, value)
+  assert.ok(String(blocks[0].text).includes('docs.blender.org'))
 })
 
 test('capture refuses background mode with a clear reason', async () => {
