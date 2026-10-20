@@ -46,3 +46,12 @@ test('appendAudit writes one JSONL record and hashes the code', async () => {
   assert.equal(second.code, undefined)
   assert.equal(second.codeSha256, first.codeSha256)
 })
+
+test('appendAudit keeps hashes but not code by default', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-audit-'))
+  await appendAudit({ taskDir: dir, code: 'result = {}', entry: { tool: 'blender_mcp_exec', task: 'lamp' } })
+  const record = JSON.parse((await readFile(path.join(dir, 'audit.jsonl'), 'utf8')).trim())
+  assert.equal(record.tool, 'blender_mcp_exec')
+  assert.equal(record.code, undefined)
+  assert.match(record.codeSha256, /^[0-9a-f]{64}$/)
+})

@@ -3,7 +3,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -21,7 +21,8 @@ import {
 test('slugifyTaskName keeps CJK and strips separators', () => {
   assert.equal(slugifyTaskName('灯 lamp/2'), '灯-lamp-2')
   assert.equal(slugifyTaskName('  '), 'task')
-  assert.equal(slugifyTaskName('CON'), '_CON')
+  assert.equal(slugifyTaskName('CON'), '_con')
+  assert.equal(slugifyTaskName('Lamp'), slugifyTaskName('lamp'))
   assert.equal(slugifyTaskName('a'.repeat(80)).length, 48)
   assert.equal(slugifyTaskName('a:b*c?'), 'a-b-c')
   assert.equal(taskDirName('灯 lamp/2'), '.dsh-blender-灯-lamp-2')
@@ -50,6 +51,10 @@ test('ensureTaskDir claims a marker, reuses its own, and never steals another se
   const other = await ensureTaskDir({ root, task: 'lamp', sessionId: 's2' })
   assert.equal(other.created, true)
   assert.equal(other.name, '.dsh-blender-lamp-2')
+
+  const sameTaskDifferentCase = await ensureTaskDir({ root, task: 'LAMP', sessionId: 's1' })
+  assert.equal(sameTaskDifferentCase.created, false)
+  assert.equal(sameTaskDifferentCase.dir, first.dir)
 })
 
 test('an unmarked existing directory is treated as someone else data', async () => {
@@ -76,6 +81,20 @@ test('listSnapshots orders by numeric generation', async () => {
     await writeFile(path.join(task.dir, 'snapshots', name), 'x')
   }
   assert.deepEqual(await listSnapshots(task.dir), ['2-001.blend', '9-001.blend', '10-001.blend'])
+})
+
+test('isInsideTask resolves a directory link before deciding', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-task-'))
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'dsh-outside-'))
+  const taskDir = path.join(root, '.dsh-blender-lamp')
+  await mkdir(taskDir, { recursive: true })
+  try {
+    await symlink(outside, path.join(taskDir, 'link'), 'junction')
+  } catch {
+    t.skip('creating a directory link is not permitted on this host')
+    return
+  }
+  assert.equal(isInsideTask(path.join(taskDir, 'link', 'x.txt'), taskDir), false)
 })
 
 test('isInsideTask stops at the directory boundary', () => {

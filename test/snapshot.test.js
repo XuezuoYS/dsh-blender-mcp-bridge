@@ -11,7 +11,7 @@ import { createSnapshot, planRotation, snapshotFileName, SnapshotError } from '.
 import { ensureTaskDir } from '../lib/taskDir.js'
 
 test('snapshot names sort by generation', () => {
-  assert.equal(snapshotFileName(3, 7), '3-007.blend')
+  assert.equal(snapshotFileName(3, 7), '3-000007.blend')
   assert.ok(snapshotFileName(3, 10) > snapshotFileName(3, 9))
 })
 
@@ -53,7 +53,7 @@ function fakeSnapshotSender() {
     assert.ok(match, 'snapshot code must carry an absolute filepath literal')
     const filePath = JSON.parse(match[1])
     await writeFile(filePath, 'BLEND')
-    return { response: { status: 'ok', result: { written: filePath } } }
+    return { response: { status: 'ok', result: { written: filePath, filepathUnchanged: true, dirtyBefore: false, dirtyAfter: false } } }
   }
 }
 
@@ -73,7 +73,7 @@ test('createSnapshot writes the file and rotates after success', async () => {
     timeoutMs: 1000,
   })
 
-  assert.equal(result.name, '1-004.blend')
+  assert.equal(result.name, '1-000004.blend')
   assert.equal(result.bytes, 5)
   assert.deepEqual(
     result.removed.map((entry) => path.basename(entry)),
@@ -100,8 +100,25 @@ test('createSnapshot rotates the oldest turn, not the lexically first name', asy
     timeoutMs: 1000,
   })
 
-  assert.equal(result.name, '11-011.blend')
+  assert.equal(result.name, '11-000011.blend')
   assert.deepEqual(result.removed.map((entry) => path.basename(entry)), ['8-008.blend'])
+})
+
+test('a snapshot that changes the open file path is refused', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-snap-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  await assert.rejects(
+    createSnapshot({
+      taskDir: task.dir,
+      turn: 1,
+      seq: 1,
+      send: async () => ({ response: { status: 'ok', result: { filepathUnchanged: false } } }),
+      compress: true,
+      generations: 3,
+      timeoutMs: 1000,
+    }),
+    (error) => error instanceof SnapshotError && /changed the open file path/.test(error.message),
+  )
 })
 
 test('a failed snapshot is refused loudly', async () => {

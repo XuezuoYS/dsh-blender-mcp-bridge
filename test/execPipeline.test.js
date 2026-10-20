@@ -31,7 +31,7 @@ function handshakeEnvelope(blendPath, background = false) {
       objectCount: 1,
       activeScene: 'Scene',
       mode: 'OBJECT',
-      undoSteps: 32,
+      undoStepLimit: 32,
       pythonVersion: '3.13.13',
       onlineAccess: true,
       renderSettings: {
@@ -120,7 +120,7 @@ function makeBridge(setup) {
       const filePath = JSON.parse(match[1])
       await writeFile(filePath, 'BLEND')
       snapshotFiles.push(filePath)
-      return { response: { status: 'ok', result: { written: filePath } } }
+      return { response: { status: 'ok', result: { written: filePath, filepathUnchanged: true, dirtyBefore: false, dirtyAfter: false } } }
     }
     if (code.includes('screen.screenshot')) {
       const match = /_path = ("(?:\\.|[^"\\])*")/.exec(code)
@@ -207,15 +207,15 @@ test('exec writes a snapshot, runs the guarded payload, and audits the call', as
   )
 
   assert.equal(value.status, 'ok')
-  assert.equal(value.snapshot?.name, '3-001.blend')
+  assert.equal(value.snapshot?.name, '3-000001.blend')
   assert.equal(snapshotFiles.length, 1)
-  await access(path.join(blendDir, '.dsh-blender-lamp', 'snapshots', '3-001.blend'))
+  await access(path.join(blendDir, '.dsh-blender-lamp', 'snapshots', '3-000001.blend'))
   assert.ok(sent.some((code) => code.includes('_dsh_install(')))
   const auditLines = (await readFile(path.join(blendDir, '.dsh-blender-lamp', 'audit.jsonl'), 'utf8')).trim().split('\n')
   const audit = JSON.parse(auditLines[0])
   assert.equal(audit.status, 'ok')
   assert.equal(audit.task, 'lamp')
-  assert.match(audit.snapshot, /3-001\.blend$/)
+  assert.match(audit.snapshot, /3-000001\.blend$/)
 })
 
 test('L1 refusal never sends the user code to Blender', async () => {
