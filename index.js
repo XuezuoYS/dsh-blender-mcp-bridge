@@ -244,6 +244,7 @@ export function apply(ctx, config) {
         connectTimeoutMs: config.connectTimeoutMs,
         responseTimeoutMs: overrides.responseTimeoutMs ?? config.responseTimeoutMs,
         maxResponseChars: config.maxResponseChars,
+        signal: overrides.signal,
       }),
     warn: (message) => {
       ctx.logger.warn(message)

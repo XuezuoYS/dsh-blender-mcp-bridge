@@ -113,3 +113,36 @@ test('a non-JSON frame reports malformed', { timeout: 5000 }, async () => {
     await server.close()
   }
 })
+
+test('an aborted request reports aborted and closes the socket', { timeout: 5000 }, async () => {
+  const srv = net.createServer((socket) => {
+    socket.on('error', () => {})
+    socket.on('data', () => {})
+  })
+  const port = await new Promise((resolve, reject) => {
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const address = srv.address()
+      if (address === null || typeof address === 'string') {
+        reject(new Error('no port'))
+        return
+      }
+      resolve(address.port)
+    })
+  })
+  const controller = new AbortController()
+  try {
+    const pending = sendExecute({
+      host: '127.0.0.1',
+      port,
+      code: '',
+      connectTimeoutMs: 2000,
+      responseTimeoutMs: 2000,
+      signal: controller.signal,
+    })
+    setTimeout(() => controller.abort(), 20)
+    await assert.rejects(pending, (error) => error instanceof ProtocolError && error.code === 'aborted')
+  } finally {
+    await new Promise((done) => srv.close(() => done(undefined)))
+  }
+})
