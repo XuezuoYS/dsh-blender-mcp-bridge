@@ -14,14 +14,17 @@ This is a self-curated adaptation, not an official subset.
 Work inside the user's **currently open Blender session** through the
 `blender_mcp_*` tools. The session may contain unsaved work: never save the
 `.blend`, never open another file, never quit Blender, never change
-preferences. Those operations are blocked by the plugin.
+preferences. The plugin blocks the obvious calls; the guard is a mistake
+guard, not a sandbox.
 
 ## Ground rules
 
 1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`.
-2. **One undo step per `blender_mcp_exec`**: tell the user `Ctrl+Z` steps back.
+2. **One undo step per `blender_mcp_exec`**: the plugin pushes it; code that
+   pushes its own undo steps can add more. Tell the user `Ctrl+Z` steps back.
 3. **Write only under the task directory** (`.dsh-blender-<task>` next to the
-   `.blend`). Blocked writes return `suggestedPath`; do not retry the same path.
+   `.blend`); OS temp files are allowed for scratch work. Blocked writes return
+   `suggestedPath`; do not retry the same path.
 4. **Do not change render settings on your own.** Preview renders use the exact
    width/height/samples the user gave (`blender_mcp_render` restores settings).
 5. **Never roll back.** If something looks wrong (blocked write, `.blend`

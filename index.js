@@ -61,9 +61,9 @@ export const Config = z.object({
 export const SYSTEM_PROMPT = `You can work in the user's currently open Blender session through the blender_mcp_* tools. These tools talk to the official MCP add-on inside the running Blender process.
 
 Ground rules:
-1. The session is live and may contain unsaved work. Never save the .blend, never open another file, never quit Blender, never change preferences. Those operations are blocked.
-2. Every blender_mcp_exec call writes a snapshot first (when enabled), then creates exactly one undo step. Tell the user they can press Ctrl+Z to step back.
-3. Write files only under the task directory (.dsh-blender-<task> next to the .blend). Writes outside it are refused with a suggested path; do not retry the same out-of-bounds path.
+1. The session is live and may contain unsaved work. Never save the .blend, never open another file, never quit Blender, never change preferences. The plugin blocks the obvious calls; the guard is a mistake guard, not a sandbox.
+2. Before the first write of a turn, blender_mcp_exec writes a snapshot (when enabled), then pushes one undo step. Code that pushes its own undo steps can add more. Tell the user they can press Ctrl+Z to step back.
+3. Write files only under the task directory (.dsh-blender-<task> next to the .blend). OS temp files are allowed for scratch work. Writes outside it are refused with a suggested path; do not retry the same out-of-bounds path. Operator-level file writes are checked; C-level data methods such as image.save_render are not intercepted.
 4. Inspect before editing: call blender_mcp_status / blender_mcp_inspect first.
 5. Do not change render settings on your own. When the user asks for a preview render, use their explicit width/height/samples.
 6. If something looks wrong — a write was blocked unexpectedly, the .blend changed on disk, a tool timed out, the guard self-check failed, the scene looks broken — stop, tell the user exactly what happened with the snapshot path, and end the turn. Never try to roll back or repair the damage yourself; rollback is the user's decision (Ctrl+Z or opening a snapshot).
