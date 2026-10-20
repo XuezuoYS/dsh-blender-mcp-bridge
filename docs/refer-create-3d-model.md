@@ -1,6 +1,6 @@
 # 引用 `create-3d-model` 技能库
 
-本项目直接引用 `create-3d-model` 上游技能库，改写为面向 Blender 活会话的技能。本文记录这些内容的来源、许可、引用范围和标注方式。
+本项目基于 `create-3d-model` 上游技能库：顶层 `SKILL.md` 改写为面向 Blender 活会话的版本，6 个核心 `references/` 原样随包，26 个 helper 脚本也原样随包。本文记录来源、许可、引用范围和标注方式。
 
 这是一份**自行剪裁**的引用，不是上游作者发布的官方子集；原作者没有审阅、没有背书。`dsh-blender` 只作为兼容参考，不作为文件来源。
 
@@ -32,26 +32,28 @@ MIT 不授予商标权或背书权。引用时可以做事实性署名，但不�
 
 | 上游文件 | 用途 | 处理方式 |
 |---|---|---|
-| `SKILL.md` | 顶层流程：目标分类、先检查再改、blockout 到 detail、验收、交接 | 改写为 `blender-live-session`，替换工具名、保存流程和路径 |
-| `references/visual-validation.md` | 看图检查表、阶段门、纠错循环 | 节选并改写，改为 `capture` / `render` |
-| `references/core/assembly-order.md` | 11 步生产顺序、时间预算、critique 方法 | 改写，保留顺序，去掉“保存 .blend”表述 |
-| `references/modeling-patterns.md` | 坐标与命名、几何策略、modifier 顺序、失败模式 | 节选并改写 |
-| `references/core/common-object-dimensions.md` | 常见物体真实尺寸与比例 | 节选，作为数据表保留 |
-| `references/blender-5-compat.md` | 引擎名、BSDF 输入、layered Actions 等防御写法 | 节选，并按 Blender 5.2.2 复核 |
+| `SKILL.md` | 顶层流程：目标分类、先检查再改、blockout 到 detail、验收、交接 | **改写**为 `blender-live-session`（本目录唯一改写文件），替换工具名、保存流程和路径 |
+| `references/visual-validation.md` | 看图检查表、阶段门、纠错循环 | **原样复制（未修改）** |
+| `references/core/assembly-order.md` | 11 步生产顺序、时间预算、critique 方法 | **原样复制（未修改）** |
+| `references/modeling-patterns.md` | 坐标与命名、几何策略、modifier 顺序、失败模式 | **原样复制（未修改）** |
+| `references/core/common-object-dimensions.md` | 常见物体真实尺寸与比例 | **原样复制（未修改）** |
+| `references/blender-5-compat.md` | 引擎名、BSDF 输入、layered Actions 等防御写法 | **原样复制（未修改）** |
+| `references/capability-map.md` | 模块路由与推荐管线 | **原样复制（未修改）** |
 
-### 按需内容
+### 按需内容（v1 未随包）
+
+下表只记录上游模块清单；这些模块的 `SKILL.md` 正文在当前版本中**没有复制进包**，后续版本再补。
 
 | 上游文件 | 用途 | 处理方式 |
 |---|---|---|
-| `references/modules/blender-modeling/SKILL.md` | 建模配方、硬表面、失败模式 | 节选 |
-| `references/modules/blender-materials/SKILL.md` | PBR 配方、物理值、`set_input` | 节选 |
-| `references/modules/blender-lighting/SKILL.md` | 三点光、灯位、色温 | 节选 |
-| `references/modules/blender-cameras/SKILL.md` | 焦距、光圈、构图 | 节选 |
-| `references/modules/blender-rendering/SKILL.md` | Cycles / EEVEE、采样、降噪 | 节选 |
-| `references/modules/blender-export/SKILL.md` | 各格式参数、polycount、导出验证 | 节选 |
-| `references/capability-map.md` | 模块路由与推荐管线 | 节选，只保留实际注册的模块 |
+| `references/modules/blender-modeling/SKILL.md` | 建模配方、硬表面、失败模式 | v1 未随包 |
+| `references/modules/blender-materials/SKILL.md` | PBR 配方、物理值、`set_input` | v1 未随包 |
+| `references/modules/blender-lighting/SKILL.md` | 三点光、灯位、色温 | v1 未随包 |
+| `references/modules/blender-cameras/SKILL.md` | 焦距、光圈、构图 | v1 未随包 |
+| `references/modules/blender-rendering/SKILL.md` | Cycles / EEVEE、采样、降噪 | v1 未随包 |
+| `references/modules/blender-export/SKILL.md` | 各格式参数、polycount、导出验证 | v1 未随包 |
 
-其余参考锁定模块（`wireframe-to-3d`、`reference-to-3d`、`multiview-*`、`atlas-uv-fitting`、`closed-surface-uv-coverage`、`texture-*` 等）的 `SKILL.md`、`references/` 和 helper 脚本也随包保留；是否注册成独立技能待定，默认按需引用。
+其余参考锁定模块（`wireframe-to-3d`、`reference-to-3d`、`multiview-*`、`atlas-uv-fitting`、`closed-surface-uv-coverage`、`texture-*` 等）的随包范围见下面的“参考锁定模块”一节。
 
 ### Helper 运行时
 
@@ -66,7 +68,7 @@ v1 自带 `create-3d-model` 技能库的 26 个 helper，不依赖 `dsh-blender`
 
 ### 参考锁定模块
 
-`wireframe-to-3d`、`reference-to-3d`、`multiview-*`、`atlas-uv-fitting`、`closed-surface-uv-coverage`、`texture-*` 的 helper 脚本随包放在 `helpers/`，核心 references 放在 `skills/blender-live-session/references/`；29 个领域模块的 `SKILL.md` 正文 v1 暂不随包（后续版本再补），实现时按需从上游读取。它们的自动化流程在 v1 可用，但前提是分析 Python 依赖已经安装：
+`wireframe-to-3d`、`reference-to-3d`、`multiview-*`、`atlas-uv-fitting`、`closed-surface-uv-coverage`、`texture-*` 的 helper 脚本随包放在 `helpers/`，6 个核心 references 放在 `skills/blender-live-session/references/`；29 个领域模块的 `SKILL.md` 正文 v1 暂不随包（后续版本再补），实现时按需从上游读取。它们的自动化流程在 v1 可用，但前提是分析 Python 依赖已经安装：
 
 - Blender 运行时 helper：`surface-texture-coverage-audit` 直接通过插件内部 exec 运行，只读、不 push；
 - 外部 Python helper：通过 `blender_mcp_helper` 启动独立 Python 进程，参数按 catalog 校验，输出只落任务目录；
@@ -78,7 +80,11 @@ v1 自带 `create-3d-model` 技能库的 26 个 helper，不依赖 `dsh-blender`
 
 ### 文件头
 
-每个改写文件在开头标明来源、版本、许可和改动。Markdown 用 HTML 注释，JS 用 `//`，Python 用 `#`。
+**改写文件**（当前只有 `SKILL.md`）在开头标明来源、版本、许可和改动。Markdown 用 HTML 注释，JS 用 `//`，Python 用 `#`。
+
+`references/` 下的 6 个文件是上游**原样复制、未修改**，所以不添加文件头；来源、许可和逐文件清单见 `references/NOTICE.md`，两份 MIT 全文见同级 `LICENSES/`。不要为了加署名而修改这些文件，否则会破坏逐字节一致性。
+
+下面是 `SKILL.md` 使用的文件头示例：
 
 ```md
 <!--
@@ -98,12 +104,14 @@ This is a self-curated adaptation, not an official subset.
 如果复制了上游文件，技能目录下保留原始许可：
 
 ```text
-skills/blender-live-.../
+skills/blender-live-session/
 ├── LICENSES/
 │   ├── CheshireJCat-MIT.txt
 │   └── RobLe3-MIT.txt
 ├── SKILL.md
-└── references/...
+└── references/
+    ├── NOTICE.md
+    └── ...
 ```
 
 MIT 要求版权声明和许可全文随副本走，不能只留一个链接。
