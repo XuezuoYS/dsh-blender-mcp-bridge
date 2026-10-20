@@ -59,7 +59,7 @@ MIT 不授予商标权或背书权。引用时可以做事实性署名，但不�
 
 v1 自带 `create-3d-model` 技能库的 26 个 helper，不依赖 `dsh-blender` 的安装或分析环境：
 
-- 23 个常规 helper 直接进模型可调用的工具面；
+- 23 个常规 helper 纳入 `blender_mcp_helpers` / `blender_mcp_helper` 两个工具，不是 23 个独立工具；
 - 3 个维护类 helper（`skill-graph-audit`、`release-readiness-check`、`sanitize-skill-contributions`）随包保留，但默认隐藏，只有打开 `enableMaintenanceHelpers` 才可用；
 - 本插件自己的 `blender_mcp_helpers` / `blender_mcp_helper` 负责列出和运行 helper；
 - Python 解释器、依赖清单、安装脚本都由本插件管理，不共享 `dsh-blender` 的 `.venv`。

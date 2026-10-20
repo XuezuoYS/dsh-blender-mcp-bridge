@@ -6,7 +6,7 @@
 
 `create-3d-model` 技能库共有 26 个 helper：
 
-- 23 个常规 helper：v1 直接加入模型可调用的工具面；
+- 23 个常规 helper：v1 纳入 `blender_mcp_helpers` / `blender_mcp_helper` 两个工具，不是 23 个独立工具；
 - 3 个维护类 helper（`skill-graph-audit`、`release-readiness-check`、`sanitize-skill-contributions`）：随包保留，但默认隐藏，只有显式打开 `enableMaintenanceHelpers` 才可用。它们改的是技能库本身，不是 Blender 场景，不应混进日常建模流程。
 
 不依赖 `dsh-blender`：Python 解释器、helper 脚本、依赖清单都由本插件自己管理；`dsh-blender` 装不装都能用。
@@ -32,7 +32,7 @@ helper 脚本和 catalog 内容直接来自 `CheshireJCat/create-3d-model-skill`
 - Node 侧用 `child_process.spawn` 启动 `analysisPython`，不经过 shell；
 - 只允许运行随包脚本，脚本路径来自 helper 目录表，不接受任意路径；
 - 参数由 Node 侧按 catalog 校验，再拼成固定参数数组；
-- 工作目录固定为插件目录，输入路径解析成绝对路径，输出只允许落任务目录；
+- 工作目录是当前任务目录（不再使用只读的插件安装目录），输入路径解析成绝对路径，输出只允许落任务目录；
 - Python helper **不要求 Blender 活会话**；任务目录在 Blender 未连接时按 workspace 落；
 - stdout/stderr 有上限，超时杀进程；
 - 返回解析后的 JSON（能解析时）、报告路径、stdout/stderr 摘要。
@@ -55,7 +55,7 @@ helper 脚本和 catalog 内容直接来自 `CheshireJCat/create-3d-model-skill`
 2. 自动探测 `python`、`python3`、Windows 的 `py -3`；
 3. 找不到就报明确错误，不安装、不下载、不静默跳过。
 
-探测时跑一次 `python -c "import sys; print(sys.version_info[:3])"`，并把路径和版本记进 `blender_mcp_helpers` 的结果。
+探测时跑一次 `python -c "import sys; print('%d.%d' % sys.version_info[:2])"`，并把解释器命令、版本和来源记进 `blender_mcp_helpers` 的结果。
 
 ### 3.3 安装
 
@@ -89,8 +89,8 @@ v1 新增两个工具，工具总数从 6 个变 8 个。
 
 只读列出 helper：
 
-- `name`、`module`、`description`；
-- `runtime`：`blender` 或 `python`；
+- `name`、`runtime`（`blender` 或 `python`）、`maintenance`；
+- 顶层 `python`：解释器版本、来源、命令与固定参数；
 - `dependencies`；
 - `ready`、`missing`；
 - 参数 schema（名称、类型、是否必填、路径方向）。
@@ -123,7 +123,7 @@ v1 新增两个工具，工具总数从 6 个变 8 个。
 - `stdout` / `stderr` 摘要；
 - `outputs[]`：实际产生的文件（绝对路径、字节数）；
 - `durationMs`；
-- 如果输出里有 PNG/JPEG/WebP，按图片块规则附给模型；模型不支持图片时只给路径。
+- 如果输出里有 PNG/JPEG/WebP/GIF，按图片块规则附给模型；模型不支持图片时只给路径。
 
 ## 5. 安全边界
 
@@ -132,11 +132,11 @@ v1 新增两个工具，工具总数从 6 个变 8 个。
 - 不接受 AI 直接提供脚本路径或代码；
 - 只接受 catalog 里的 helper 名和结构化参数；
 - `spawn` 不使用 shell，参数逐个传递；
-- 环境变量只保留 `PATH`、`SYSTEMROOT`、`TEMP`、`TMP` 和 UTF-8 相关项，不传 API key、token、代理凭据；
+- 环境变量只保留 `PATH`、`SYSTEMROOT`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA` 和 UTF-8 相关项，不传 API key、token、代理凭据；
 - 超时默认 120 s，硬上限 10 min；
 - stdout/stderr 上限 200k 字符，超限截断并标记；
 - 维护类 helper 默认关闭；
-- 运行记录进任务目录 `audit.jsonl`（helper 名、参数摘要、耗时、输出文件）；
+- 运行记录进任务目录 `audit.jsonl`（工具名、helper 名、参数摘要、耗时、输出文件）；默认只存代码 sha256，`audit.storeCode=true` 才存原文；
 - 这些 helper 不联网、不安装包；需要安装时由用户显式跑 setup 脚本。
 
 仍然不是沙箱：helper 脚本是随包代码，如果脚本本身有 bug，仍可能写坏文件；路径限制和输出目录限制是防误操作，不是安全隔离。
@@ -148,11 +148,11 @@ v1 新增两个工具，工具总数从 6 个变 8 个。
 | 分类 | helper |
 |---|---|
 | Blender 运行时（1） | `surface-texture-coverage-audit` |
-| 纯 Python 报告/计划（6） | `atlas-region-mapper`、`fit-repair-queue`、`landmark-fit-report`、`view-constraint-report`、`quality-refinement-plan`、`orbit-layout-manifest` |
+| 纯 Python 报告/计划（7） | `atlas-region-mapper`、`fit-repair-queue`、`landmark-fit-report`、`view-constraint-report`、`quality-refinement-plan`、`orbit-layout-manifest`、`contour-correspondence-report` |
 | Pillow（2） | `animation-contact-sheet`、`texture-transition-plan` |
-| OpenCV + NumPy（14） | `atlas-region-detector`、`multiview-fit-report`、`register-orthographic-views`、`reference-manifest-compiler`、`render-overlay-validator`、`look-fit-report`、`silhouette-validator`、`template-analyzer`、`seeded-part-masks`、`segment-source-parts`、`contour-correspondence-report`、`mask-to-mesh-recipe`、`source-locked-skin-recipe`、`wireframe-analyzer` |
-
-其中 `mask-to-mesh-recipe`、`source-locked-skin-recipe`、`wireframe-analyzer` 还需要 SciPy。
+| OpenCV（4） | `atlas-region-detector`、`register-orthographic-views`、`look-fit-report`、`segment-source-parts` |
+| OpenCV + NumPy（6） | `multiview-fit-report`、`reference-manifest-compiler`、`render-overlay-validator`、`silhouette-validator`、`template-analyzer`、`seeded-part-masks` |
+| OpenCV + NumPy + SciPy（3） | `mask-to-mesh-recipe`、`source-locked-skin-recipe`、`wireframe-analyzer` |
 
 ### 6.2 默认关闭（3）
 
@@ -184,7 +184,7 @@ helper:
 7. 超时能杀掉进程并返回 `timeout`；输出超限被截断。
 8. 任意脚本路径、任意 Python 代码、`--help` 之外的额外参数都不能注入。
 9. 维护类 helper 默认不出现；打开 `enableMaintenanceHelpers` 后可列出、可运行，结果里明确提示“会改技能库文件，不只是场景”。
-10. 运行记录进 `audit.jsonl`，包含 helper 名、耗时、输出文件。
+10. 运行记录进 `audit.jsonl`，包含工具名、helper 名、参数摘要、耗时、输出文件；默认不存代码原文。
 
 ## 9. 风险
 
