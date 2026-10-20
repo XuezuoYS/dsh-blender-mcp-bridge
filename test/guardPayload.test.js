@@ -25,6 +25,18 @@ test('guarded payload installs hooks, blocks save operators and uninstalls', () 
   assert.match(code, /_op_create_function/)
 })
 
+test('the ops proxy keeps the real bpy.ops out of reach', () => {
+  const code = wrapWithGuard('result = {}', {
+    taskRoot: 'C:/proj/.dsh-blender-lamp',
+    undoMessage: 'dsh-blender: lamp',
+  })
+  assert.doesNotMatch(code, /__slots__ = \('_dsh_real',\)/)
+  assert.doesNotMatch(code, /self\._dsh_real/)
+  assert.doesNotMatch(code, /self\._dsh_proxy/)
+  assert.match(code, /def _dsh_make_ops_proxy\(real_ops\)/)
+  assert.match(code, /if item\.startswith\('_'\):/)
+})
+
 test('guard can be disabled without dropping the undo step', () => {
   const code = wrapWithGuard('result = {}', {
     taskRoot: 'C:/proj/.dsh-blender-lamp',
