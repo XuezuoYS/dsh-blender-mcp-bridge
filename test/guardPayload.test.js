@@ -12,8 +12,10 @@ test('guarded payload installs hooks, blocks save operators and uninstalls', () 
     taskRoot: 'C:/proj/.dsh-blender-lamp',
     undoMessage: 'dsh-blender: lamp',
   })
-  assert.match(code, /_dsh_install\("C:\/proj\/\.dsh-blender-lamp"\)/)
-  assert.match(code, /^_dsh_uninstall\(\)/m)
+  assert.match(code, /_dsh_handle = _dsh_install\("C:\/proj\/\.dsh-blender-lamp"\)/)
+  assert.match(code, /_dsh_uninstall\(_dsh_handle\)/)
+  assert.match(code, /finally:/)
+  assert.match(code, /preferencesChanged/)
   assert.match(code, /wm\.save_mainfile/)
   assert.match(code, /wm\.open_mainfile/)
   assert.match(code, /bpy\.data\.libraries\.write/)

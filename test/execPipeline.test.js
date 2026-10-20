@@ -422,3 +422,86 @@ test('a Python helper runs without a Blender connection', async () => {
   assert.equal(value.status, 'ok')
   assert.equal(sent.length, 0)
 })
+
+test('a missing undo step turns the exec into an error', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    snapshotEnabled: false,
+    execResult: () => ({
+      status: 'ok',
+      result: {},
+      undo: { pushed: false, error: 'undo disabled' },
+      guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+      warnings: [],
+    }),
+  })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'error')
+  assert.ok(
+    (/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('undo step was not pushed')),
+  )
+})
+
+test('restored preferences are surfaced as blocked', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    snapshotEnabled: false,
+    execResult: () => ({
+      status: 'ok',
+      result: {},
+      undo: { pushed: true },
+      guard: {
+        enabled: true,
+        verified: true,
+        opsIntact: true,
+        blocked: [{ target: 'edit.undo_steps', action: 'preferences', kind: 'preferences' }],
+        noted: [],
+        preferencesChanged: ['edit.undo_steps'],
+      },
+      warnings: [],
+    }),
+  })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'blocked')
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('Preferences changed')))
+})
+
+test('a guard self-check exception is surfaced', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    snapshotEnabled: false,
+    execResult: () => ({
+      status: 'ok',
+      result: {},
+      undo: { pushed: true },
+      guard: {
+        enabled: true,
+        verified: false,
+        hooksIntact: false,
+        opsIntact: false,
+        blocked: [],
+        noted: [],
+        verifyError: 'AttributeError: bpy.ops',
+      },
+      warnings: [],
+    }),
+  })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'error')
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('self-check threw')))
+})
