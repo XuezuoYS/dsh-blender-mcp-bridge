@@ -28,7 +28,8 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "dsh": {
     "manifestVersion": 1,
@@ -37,8 +38,10 @@
     }
   },
   "engines": {
-    "dsh": "0.2.1-rc.2"
+    "dsh": ">=0.2.1-rc.2 <0.3.0",
+    "node": ">=22.0.0"
   },
+  "packageManager": "pnpm@11.21.0",
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
@@ -60,12 +63,14 @@
     "requirements-analysis.txt",
     "scripts",
     "skills",
+    "diagnostics",
+    "test",
     "README.md",
     "LICENSE"
   ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "typescript": "^7.0.2"
+    "typescript": "7.0.2"
   }
 }
