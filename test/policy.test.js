@@ -38,6 +38,26 @@ test('writes inside the task directory pass', () => {
 test('read-only opens and ordinary code pass', () => {
   const result = scanRequest('obj = bpy.context.active_object\nprint(obj.name)', TASK_DIR)
   assert.equal(result.blocks.length, 0)
+  const read = scanRequest('data = open("C:/Users/me/notes.txt").read()', TASK_DIR)
+  assert.equal(read.blocks.length, 0)
+})
+
+test('forward-slash paths inside the task directory pass', () => {
+  const inside = `${TASK_DIR.replace(/\\/g, '/')}/out.png`
+  const result = scanRequest(`open("${inside}", "w")`, TASK_DIR)
+  assert.equal(result.blocks.length, 0)
+})
+
+test('dot-dot escapes, pathlib writes and split preferences are refused', () => {
+  const cases = [
+    'open("C:\\\\proj\\\\.dsh-blender-lamp\\\\..\\\\..\\\\Users\\\\me\\\\x.blend", "w")',
+    'import pathlib\npathlib.Path("C:/Users/me/x.txt").write_text("a")',
+    'import pathlib\npathlib.Path("C:/Users/me/x.txt").open("w")',
+    'p = bpy.context\np.preferences.theme = 1',
+  ]
+  for (const code of cases) {
+    assert.ok(scanRequest(code, TASK_DIR).blocks.length > 0, `expected a block for: ${code}`)
+  }
 })
 
 test('dynamic bypasses are warned about, not claimed as blocked', () => {
