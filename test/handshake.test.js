@@ -32,7 +32,7 @@ function facts(overrides = {}) {
     objectCount: 3,
     activeScene: 'Scene',
     mode: 'OBJECT',
-    undoSteps: 32,
+    undoStepLimit: 32,
     pythonVersion: '3.13.13',
     onlineAccess: true,
     renderSettings: {
@@ -84,5 +84,11 @@ test('transport failures map to actionable kinds', () => {
   )
   assert.equal(classifyTransportError(new ProtocolError('response-timeout', 'slow')).kind, 'response-timeout')
   assert.equal(classifyTransportError(new ProtocolError('malformed', 'bad json')).kind, 'foreign-peer')
+  const closed = classifyTransportError(new ProtocolError('closed', 'connection closed'))
+  assert.equal(closed.kind, 'closed')
+  assert.ok(closed.actions.some((action) => /crashed|closed/i.test(action)))
+  const socket = classifyTransportError(new ProtocolError('socket-error', 'reset'))
+  assert.equal(socket.kind, 'socket-error')
+  assert.ok(socket.actions.length > 0)
   assert.equal(classifyTransportError(new Error('boom')).kind, 'socket-error')
 })

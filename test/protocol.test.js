@@ -114,6 +114,26 @@ test('a non-JSON frame reports malformed', { timeout: 5000 }, async () => {
   }
 })
 
+test('a complete frame over the cap reports too-large', { timeout: 5000 }, async () => {
+  const reply = Buffer.from(`${JSON.stringify({ status: 'ok', result: 'x'.repeat(200) })}\u0000`)
+  const server = await startServer(reply)
+  try {
+    await assert.rejects(
+      sendExecute({
+        host: '127.0.0.1',
+        port: server.port,
+        code: '',
+        connectTimeoutMs: 2000,
+        responseTimeoutMs: 2000,
+        maxResponseChars: 50,
+      }),
+      (error) => error instanceof ProtocolError && error.code === 'too-large',
+    )
+  } finally {
+    await server.close()
+  }
+})
+
 test('an aborted request reports aborted and closes the socket', { timeout: 5000 }, async () => {
   const srv = net.createServer((socket) => {
     socket.on('error', () => {})

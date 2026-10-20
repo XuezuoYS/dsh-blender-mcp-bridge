@@ -66,8 +66,8 @@ test('capture payload screenshots the window to an absolute PNG path', () => {
   assert.match(code, /bpy\.ops\.screen\.screenshot\(filepath=/)
   assert.match(code, /C:\/proj\/\.dsh-blender-lamp\/captures\/window\.png/)
   assert.match(code, /dsh_blender_mcp_guard/)
-  assert.match(captureFileName('blockout'), /^blockout-\d{14}\.png$/)
-  assert.match(captureFileName(undefined), /^window-\d{14}\.png$/)
+  assert.match(captureFileName('blockout'), /^blockout-\d{17}\.png$/)
+  assert.match(captureFileName(undefined), /^window-\d{17}\.png$/)
 })
 
 test('render payload sets and restores every touched setting', () => {
@@ -84,7 +84,7 @@ test('render payload sets and restores every touched setting', () => {
   assert.ok(code.includes("_before['eevee_samples']"))
   assert.ok(code.includes("_before['cycles_samples']"))
   assert.ok(code.includes("_before['cycles_denoise']"))
-  assert.match(renderFileName(undefined), /^render-\d{14}\.png$/)
+  assert.match(renderFileName(undefined), /^render-\d{17}\.png$/)
 })
 
 test('readPngSize parses IHDR dimensions', async () => {
@@ -99,7 +99,7 @@ test('createCapture writes into captures/ and reports dimensions', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-visual-'))
   const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
   const result = await createCapture({ taskDir: task.dir, label: 'shot', send: fakeSender(), timeoutMs: 1000 })
-  assert.match(result.path, /captures[\\/]shot-\d{14}\.png$/)
+  assert.match(result.path, /captures[\\/]shot-\d{17}\.png$/)
   assert.equal(result.width, 640)
   assert.equal(result.height, 360)
   assert.ok(result.bytes > 0)
@@ -116,7 +116,7 @@ test('createRender writes into renders/ and reports engine and samples', async (
     send: fakeSender(),
     timeoutMs: 1000,
   })
-  assert.match(result.path, /renders[\\/]render-\d{14}\.png$/)
+  assert.match(result.path, /renders[\\/]render-\d{17}\.png$/)
   assert.equal(result.width, 640)
   assert.equal(result.engine, 'BLENDER_EEVEE')
   assert.equal(result.samples, 16)

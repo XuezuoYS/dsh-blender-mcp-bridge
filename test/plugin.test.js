@@ -54,6 +54,15 @@ function runApply(includeSkills = true) {
     effect(setup) {
       return setup()
     },
+    /**
+     * @param {string[]} deps - required services
+     * @param {(ctx: any) => void} callback - plugin body
+     * @returns {{ then: () => void }} minimal fiber
+     */
+    inject(deps, callback) {
+      if (deps.includes('skills') && includeSkills) callback(ctx)
+      return { then() {} }
+    },
     tools: {
       /**
        * @param {RegisteredTool} tool - tool definition

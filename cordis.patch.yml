@@ -32,4 +32,4 @@
           enableMaintenanceHelpers: false
         audit:
           enabled: true
-          storeCode: true
+          storeCode: false

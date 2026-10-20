@@ -31,7 +31,7 @@ export const Config = z.object({
   responseTimeoutMs: z.natural().min(1000).default(30000),
   captureTimeoutMs: z.natural().min(1000).default(30000),
   renderTimeoutMs: z.natural().min(1000).default(120000),
-  maxResponseChars: z.natural().min(1000).default(200000),
+  maxResponseChars: z.natural().min(1000).default(200000).description('Byte cap for one reply; the name is historical.'),
   taskRootMode: z.union(['blendFile', 'workspace']).default('blendFile'),
   taskRoot: z.string().default(''),
   snapshot: z.object({
@@ -53,7 +53,7 @@ export const Config = z.object({
   }),
   audit: z.object({
     enabled: z.boolean().default(true),
-    storeCode: z.boolean().default(true),
+    storeCode: z.boolean().default(false),
   }),
 })
 
@@ -110,6 +110,24 @@ export function apply(ctx, config) {
       turns.set(session.id, event.data.turn)
       const prefix = `${session.id}\u0000`
       for (const key of snapshotTaken) if (key.startsWith(prefix)) snapshotTaken.delete(key)
+    },
+    { global: true },
+  )
+
+  ctx.on(
+    'session/disposed',
+    /**
+     * @param {{ id?: string } | undefined} session - disposed session record
+     * @returns {void}
+     */
+    (session) => {
+      if (!session || typeof session.id !== 'string') return
+      const prefix = `${session.id}\u0000`
+      turns.delete(session.id)
+      timeoutNotes.delete(session.id)
+      knownFilePaths.delete(session.id)
+      for (const key of snapshotTaken) if (key.startsWith(prefix)) snapshotTaken.delete(key)
+      for (const key of snapshotSeq.keys()) if (key.startsWith(prefix)) snapshotSeq.delete(key)
     },
     { global: true },
   )
@@ -176,14 +194,15 @@ export function apply(ctx, config) {
     if (!llm || typeof llm.resolveModelInfo !== 'function' || !attachments) return false
     const record = typeof exec === 'object' && exec !== null ? /** @type {Record<string, any>} */ (exec) : {}
     const session = record.agent && record.agent.session ? record.agent.session : undefined
-    if (!session || typeof session.requestHeader !== 'function') return false
     try {
-      const header = session.requestHeader()
-      const config = header && header.config ? header.config : undefined
-      const provider = config && typeof config.provider === 'string' ? config.provider : ''
-      const model = config && typeof config.model === 'string' ? config.model : ''
+      const header = session && typeof session.requestHeader === 'function' ? session.requestHeader() : undefined
+      const routed = header && header.config ? header.config : undefined
+      const options = record.agent && record.agent.options ? record.agent.options : undefined
+      const provider = typeof routed?.provider === 'string' ? routed.provider : typeof options?.provider === 'string' ? options.provider : ''
+      const model = typeof routed?.model === 'string' ? routed.model : typeof options?.model === 'string' ? options.model : ''
       if (provider === '' || model === '') return false
-      const info = await llm.resolveModelInfo(provider, model)
+      const signal = record.signal instanceof AbortSignal ? record.signal : undefined
+      const info = await llm.resolveModelInfo(provider, model, signal)
       return Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')
     } catch {
       return false
@@ -289,15 +308,18 @@ export function apply(ctx, config) {
 
   const packageRoot = path.dirname(fileURLToPath(import.meta.url))
   const skillDir = path.join(packageRoot, 'skills', 'blender-live-session')
-  const skills = ctx.get('skills')
-  if (skills && typeof skills.register === 'function') {
+  // Wait for the skills service instead of sampling it once during apply:
+  // a service mounted later would otherwise leave the skill silently absent.
+  ctx.inject(['skills'], (/** @type {any} */ skillsCtx) => {
+    const skills = skillsCtx.get('skills')
+    if (!skills || typeof skills.register !== 'function') return
     let content = LIVE_SESSION_SKILL_FALLBACK
     try {
       content = readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8')
     } catch (error) {
-      ctx.logger.warn(`could not read the live-session skill: ${error instanceof Error ? error.message : String(error)}`)
+      skillsCtx.logger.warn(`could not read the live-session skill: ${error instanceof Error ? error.message : String(error)}`)
     }
-    ctx.effect(
+    skillsCtx.effect(
       () =>
         skills.register({
           name: 'blender-live-session',
@@ -313,7 +335,7 @@ export function apply(ctx, config) {
         }),
       'blender-mcp: live-session skill',
     )
-  }
+  })
 
   ctx.systemPrompt.section({
     name: 'blender-mcp-bridge',
