@@ -78,6 +78,29 @@ test('positional image lists are spread in order', async () => {
   assert.ok(argv.includes('--out'))
 })
 
+test('option-like helper values are refused before argv is built', async () => {
+  const taskDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
+  const transition = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('texture-transition-plan'))
+  await assert.rejects(
+    buildHelperCommand(transition, { images: ['a.png'], names: ['--out', 'C:/evil.json'] }, taskDir),
+    /must not start with "-"/,
+  )
+  const atlas = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('atlas-region-detector'))
+  await assert.rejects(
+    buildHelperCommand(atlas, { image: 'a.png', out: 'o.json', mode: '--out' }, taskDir),
+    /must not start with "-"/,
+  )
+  const wireframe = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('wireframe-analyzer'))
+  await assert.rejects(buildHelperCommand(wireframe, { image: '--out' }, taskDir), /must not start with "-"/)
+})
+
+test('negative numeric helper values are allowed', async () => {
+  const taskDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
+  const helper = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('atlas-region-detector'))
+  const { argv } = await buildHelperCommand(helper, { image: 'a.png', out: 'o.json', 'min-area': -1 }, taskDir)
+  assert.equal(argv[argv.indexOf('--min-area') + 1], '-1')
+})
+
 test('a pure-Python helper runs end to end and writes inside the task directory', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
   const workspaceDir = path.join(root, 'workspace')
