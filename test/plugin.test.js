@@ -82,8 +82,10 @@ function runApply(includeSkills = true) {
 test('config defaults are applied and invalid values fail at load time', () => {
   assert.equal(CONFIG.port, 9876)
   assert.equal(CONFIG.snapshot.generations, 3)
+  assert.equal(CONFIG.snapshot.timeoutMs, 120000)
   assert.throws(() => Config({ port: 70000 }))
   assert.throws(() => Config({ snapshot: { generations: 99 } }))
+  assert.throws(() => Config({ snapshot: { timeoutMs: 0 } }))
   assert.throws(() => Config({ taskRootMode: 'somewhere' }))
 })
 

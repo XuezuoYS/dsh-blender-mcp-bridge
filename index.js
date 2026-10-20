@@ -39,6 +39,7 @@ export const Config = z.object({
     generations: z.natural().min(1).max(20).default(3),
     on: z.union(['turn', 'write']).default('turn'),
     compress: z.boolean().default(true),
+    timeoutMs: z.natural().min(1000).default(120000),
   }),
   guard: z.object({
     enabled: z.boolean().default(true),
@@ -229,6 +230,7 @@ export function apply(ctx, config) {
       generations: config.snapshot.generations,
       on: config.snapshot.on,
       compress: config.snapshot.compress,
+      timeoutMs: config.snapshot.timeoutMs,
     },
     guard: { enabled: config.guard.enabled },
     audit: { enabled: config.audit.enabled, storeCode: config.audit.storeCode },

@@ -21,6 +21,7 @@
           generations: 3
           on: turn
           compress: true
+          timeoutMs: 120000
         guard:
           enabled: true
         helper:

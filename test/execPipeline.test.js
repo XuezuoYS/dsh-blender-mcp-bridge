@@ -155,7 +155,7 @@ function makeBridge(setup) {
     captureTimeoutMs: 1000,
     renderTimeoutMs: 1000,
     maxResponseChars: 200000,
-    snapshot: { enabled: setup.snapshotEnabled !== false, generations: 3, on: 'turn', compress: true },
+    snapshot: { enabled: setup.snapshotEnabled !== false, generations: 3, on: 'turn', compress: true, timeoutMs: 1000 },
     guard: { enabled: true },
     audit: { enabled: true, storeCode: true },
     taskRoot: '',
