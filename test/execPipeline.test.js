@@ -428,8 +428,13 @@ test('status reports the live facts and lists task directories', async () => {
   assert.equal(value.taskDirs.length, 1)
   assert.equal(value.taskDirs[0].name, '.dsh-blender-lamp')
   assert.equal(value.taskDirs[0].snapshots, 1)
+  assert.equal(value.taskDirs[0].snapshotDetails.length, 1)
+  assert.equal(value.taskDirs[0].snapshotDetails[0].name, '3-000001.blend')
+  assert.equal(value.taskDirs[0].snapshotDetails[0].bytes, 5)
+  assert.match(value.taskDirs[0].snapshotDetails[0].modifiedAt, /^\d{4}-\d{2}-\d{2}T/)
   const blocks = statusTool.output.render({}, value)
   assert.ok(String(blocks[0].text).includes('docs.blender.org'))
+  assert.ok(String(blocks[0].text).includes('3-000001.blend (5 bytes'))
 })
 
 test('status warns when autosave moves the .blend path', async () => {

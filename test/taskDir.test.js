@@ -74,6 +74,24 @@ test('listTaskDirs reports markers and snapshot counts without creating anything
   assert.equal(listed[0].snapshots, 0)
 })
 
+test('listTaskDirs returns complete snapshot metadata', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-task-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  await writeFile(path.join(task.dir, 'snapshots', '2-000001.blend'), 'newer')
+  await writeFile(path.join(task.dir, 'snapshots', '1-000001.blend'), 'old')
+  const listed = await listTaskDirs(root)
+  assert.equal(listed[0].snapshots, 2)
+  assert.equal(listed[0].newestSnapshot, '2-000001.blend')
+  assert.deepEqual(
+    listed[0].snapshotDetails.map((snapshot) => [snapshot.name, snapshot.bytes]),
+    [
+      ['1-000001.blend', 3],
+      ['2-000001.blend', 5],
+    ],
+  )
+  for (const snapshot of listed[0].snapshotDetails) assert.match(snapshot.modifiedAt, /^\d{4}-\d{2}-\d{2}T/)
+})
+
 test('listSnapshots orders by numeric generation', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-task-'))
   const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
