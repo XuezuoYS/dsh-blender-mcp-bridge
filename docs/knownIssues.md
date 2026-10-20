@@ -4,7 +4,7 @@
 > 场景：从零建芦苇与枫树，反复重建骨架、散布叶片、调材质和机位，中途崩过一次会话。
 > 下面每条都对应真实发生过的现象，不是推测。
 
-## P0 崩溃被报成普通超时
+## P0 崩溃被报成普通超时（已加存活探测）
 
 **现象**：Blender 崩溃后，`exec` 返回 `status: timeout`，提示"代码可能还在 Blender 里跑"。
 
@@ -12,38 +12,35 @@
 
 **影响**：模型和用户都会以为任务还在跑，不会去看崩溃日志。
 
-**建议**：超时后做一次轻量存活探测（重连 + 一次 ping）。
+**现状（2026-10-21）**：超时后会做一次 1.5 秒的轻量存活探测。连接层失败（拒绝/关闭/重置）报 `blender-unreachable`，附 `%TEMP%\blender.crash.txt` 候选；探针能回答或也超时则保持 `timeout`，并在警告里给出崩溃日志候选。进程挂起但端口仍能连接的情况仍无法证明是崩溃。
 
-- 探不通 → 报 `blender-unreachable`，附崩溃日志路径 `%TEMP%\<文件名>.crash.txt`
-- 探得通 → 保持现在的 timeout 语义
-
-## P1 Python 异常的 traceback 被吞
+## P1 Python 异常的 traceback 被吞（已修）
 
 **现象**：`IndexError`、`ValueError` 只显示一行 message，没有文件名和行号。
 
 **原因**：`lib/tools.js` 的 `renderExec` 只打印 `error.message`，而 `envelope.traceback` 早就存进结果里了。
 
-**建议**：在 Error 行下面补 3–5 帧 traceback（`文件:行号` 就够）。
+**现状（2026-10-21）**：`renderExec` 已在 Error 行下补最后 6 行 traceback，包含 `<dsh-user-code>` 的文件名和行号。
 
-## P1 exec 没有单次超时覆盖
+## P1 exec 没有单次超时覆盖（已修）
 
 **现象**：重活（4 万叶片、整棵骨架重建）单次要 10–20 秒，离 30 秒默认超时很近。
 
 **原因**：`exec` 固定用全局 `responseTimeoutMs`；`helper` 有 `timeoutMs`（上限 10 分钟），`render` 有独立的 120 秒。
 
-**建议**：给 `blender_mcp_exec` 加可选 `timeoutMs`，和 helper 同规格。
+**现状（2026-10-21）**：`blender_mcp_exec` 已支持可选 `timeoutMs`（1000–600000 ms），只覆盖本次 exec；快照、状态查询仍用全局预算。
 
-## P1 长会话把撤销栈冲掉
+## P1 长会话把撤销栈冲掉（已提供 batch）
 
 **现象**：13 轮里做了 40+ 次 `exec`，Blender 撤销栈只有 32 步，早期步骤被挤出去，用户回不到中途版本。这里的 32 是偏好里的撤销上限，不是当前历史条数；`status` 现在把它标成 `undo limit`。
 
-**建议**：提供 batch——一次调用跑多段脚本，只压一个撤销步；或者按"轮"合并。
+**现状（2026-10-21）**：`blender_mcp_exec` 已支持 `batch` 数组：多段脚本在一次调用里顺序执行，只写一次快照、只压一个撤销步。默认仍是每次调用一个撤销步；要减少长会话的撤销栈占用，需要显式使用 `batch`。
 
-## P2 自动保存恢复后 task root 静默切换
+## P2 自动保存恢复后 task root 静默切换（已加警告）
 
 **现象**：崩溃重启后 Blender 打开的是 `%TEMP%\..._autosave.blend`，task root 跟着变，产物被拆到两个目录。
 
-**建议**：检测到 `.blend` 路径变化时，在 `status` 和首次 `exec` 里加一条 warning。
+**现状（2026-10-21）**：`status` 和 `exec` 会对比上次记录的 `.blend` 路径；变化时提示可能发生了 autosave 恢复，并提醒检查新旧任务目录。
 
 ## P2 快照列表（部分解决）
 
@@ -55,9 +52,9 @@
 
 | 项 | 现状 | 建议 |
 |---|---|---|
-| `render` 尺寸 | 必须显式传 width/height/samples | 省略时用当前场景设置 |
+| `render` 尺寸 | 省略时使用当前场景设置，也可显式覆盖 | 已修 |
 | 审计日志 | 单轮 68 KB；已按 2 MB 轮转，默认只存代码 sha256 | 需要原文时显式开 `audit.storeCode` |
-| 崩溃恢复指引 | 只在 README 里写 | 工具输出里也提一句 |
+| 崩溃恢复指引 | 连接关闭/重置或超时探针失败时提示重开 Blender，并附崩溃日志候选 | 已修 |
 
 ## 建议的实施顺序
 
