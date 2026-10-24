@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "dsh-blender-mcp-bridge",
+    "description": "Bridges DSH to the official Blender MCP add-on so models can inspect and edit the open Blender project safely, with snapshots, undo steps, and an audit trail."
+  }
+}

@@ -26,10 +26,13 @@
   },
   "type": "module",
   "main": "index.js",
+  "icon": "./icon.svg",
   "exports": {
     ".": "./index.js",
     "./package.json": "./package.json",
-    "./cordis.patch.yml": "./cordis.patch.yml"
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "dsh": {
     "manifestVersion": 1,
@@ -57,6 +60,8 @@
   },
   "files": [
     "index.js",
+    "icon.svg",
+    "locale",
     "lib",
     "helpers",
     "cordis.patch.yml",

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Blender MCP 插件桥",
+    "description": "把 DSH 接到 Blender 官方 MCP 插件，让模型安全地查看和修改当前打开的 Blender 工程，并保留快照、撤销步和审计记录。"
+  }
+}
