@@ -266,6 +266,22 @@ test('the system prompt explains render timeouts and the status recovery tool', 
   assert.match(section.text, /blender_mcp_render_status/)
 })
 
+test('the inspect contract documents scopes, filters and paging', () => {
+  const { tools } = runApply()
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(inspectTool)
+  assert.match(inspectTool.description, /scope/)
+  assert.match(inspectTool.description, /offset/)
+  assert.match(inspectTool.description, /Read-only/)
+  assert.doesNotMatch(inspectTool.description, /up to 200 objects/)
+  const parameters = /** @type {{ properties?: Record<string, any> }} */ (inspectTool.parameters)
+  assert.ok(parameters.properties)
+  for (const name of ['scope', 'name', 'type', 'collection', 'collectionDeep', 'include', 'limit', 'offset']) {
+    assert.ok(Object.hasOwn(parameters.properties, name), `${name} must be a parameter`)
+  }
+  assert.deepEqual(parameters.properties.scope.enum, ['summary', 'objects', 'collections', 'materials', 'lights', 'cameras'])
+})
+
 test('registers the live-session skill when the skills service exists', () => {
   const { skills } = runApply()
   assert.equal(skills.length, 1)

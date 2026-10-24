@@ -19,7 +19,13 @@ guard, not a sandbox.
 
 ## Ground rules
 
-1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`.
+1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`. The
+   reply is a query, not a dump: pass `scope` (`summary`, `objects`,
+   `collections`, `materials`, `lights`, `cameras`), filter with `name` (glob),
+   `type`, `collection`, add fields with `include`, and page with `limit`
+   (1-200) and `offset`; take `paging.nextOffset` for the next page. The bare
+   call is a summary with type counts, collection aggregates and a few sample
+   objects, so a 3,000-object scene still costs one small reply.
 2. **Choose the `blender_mcp_exec` mode.** Write code uses the default mode:
    the plugin snapshots before the call according to the snapshot policy
    (default `adaptive`: the first write of a turn, every 10 writes, and
@@ -96,7 +102,7 @@ further back — the plugin never restores a snapshot by itself.
 
 | Upstream tool | Use here |
 |---|---|
-| `get_scene_info` / `get_object_info` | `blender_mcp_inspect` |
+| `get_scene_info` / `get_object_info` | `blender_mcp_inspect` (`scope`, filters, `include`, `limit`/`offset`) |
 | `execute_blender_code` | `blender_mcp_exec` (`readOnly: true` for inspection) |
 | `get_viewport_screenshot` | `blender_mcp_capture` |
 | render preview / production still | `blender_mcp_render` (`timeoutMs`, `background`) |

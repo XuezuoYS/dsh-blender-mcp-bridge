@@ -19,7 +19,7 @@ import { captureCode } from '../lib/capture.js'
 import { HANDSHAKE_CODE } from '../lib/handshake.js'
 import { renderCode } from '../lib/render.js'
 import { snapshotCode } from '../lib/snapshot.js'
-import { INSPECT_CODE } from '../lib/pythonSnippets.js'
+import { INSPECT_INCLUDES, INSPECT_SCOPES, inspectCode } from '../lib/inspect.js'
 import { findPython } from './findPython.js'
 
 const python = findPython()
@@ -32,7 +32,7 @@ console.log(`interpreter ${python}`)
 const workDir = mkdtempSync(path.join(tmpdir(), 'dsh-py-syntax-'))
 const payloads = [
   ['handshake.py', HANDSHAKE_CODE],
-  ['inspect.py', INSPECT_CODE],
+  ...INSPECT_SCOPES.map((scope) => [`inspect-${scope}.py`, inspectCode({ scope, include: [...INSPECT_INCLUDES] })]),
   ['snapshot.py', snapshotCode(path.join(workDir, 'snap.blend'), true)],
   ['capture.py', captureCode(path.join(workDir, 'shot.png'))],
   [

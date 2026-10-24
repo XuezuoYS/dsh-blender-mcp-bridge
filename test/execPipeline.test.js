@@ -85,6 +85,8 @@ function pngStub(width, height) {
  * @param {number} [setup.everyWrites] - writes between automatic snapshots
  * @param {boolean} [setup.onDestructive] - extra snapshot before delete-like code
  * @param {(inner: Record<string, unknown>) => Record<string, unknown>} [setup.execResult] - inner envelope override
+ * @param {Record<string, unknown>} [setup.inspectResult] - inspect payload result override
+ * @param {boolean} [setup.inspectFails] - make the inspect payload report an error
  * @param {() => Promise<boolean>} [setup.imageSupport] - model image capability
  * @param {(filePath: string, mediaType: string, name: string) => Promise<unknown | null>} [setup.attachImage] - attachment stub
  * @param {() => string[]} [setup.nextObjectNames] - object-name snapshots per call
@@ -95,7 +97,7 @@ function pngStub(width, height) {
  * @param {boolean} [setup.timeoutOnExec] - make the exec request time out
  * @param {boolean} [setup.probeUnreachable] - make the liveness probe fail to connect
  * @param {number} [setup.initialPushes] - undo steps already pushed this session
- * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[], pushes: () => number }} bridge pieces
+ * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[], inspectParams: Record<string, unknown>[], pushes: () => number }} bridge pieces
  */
 function makeBridge(setup) {
   /** @type {string[]} */
@@ -104,6 +106,8 @@ function makeBridge(setup) {
   const sentOptions = []
   /** @type {string[]} */
   const snapshotFiles = []
+  /** @type {Record<string, unknown>[]} */
+  const inspectParams = []
   let pushes = setup.initialPushes ?? 0
   const snapshotState = createSnapshotTracker({
     enabled: setup.snapshotEnabled !== false,
@@ -171,6 +175,32 @@ function makeBridge(setup) {
         },
       }
     }
+    if (code.includes('_dsh_inspect_params')) {
+      const encoded = /b64decode\('([A-Za-z0-9+/=]+)'\)/.exec(code)?.[1]
+      assert.ok(encoded, 'inspect code must carry base64 arguments')
+      inspectParams.push(JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')))
+      if (setup.inspectFails === true) return { response: { status: 'error', message: 'boom' } }
+      return {
+        response: {
+          status: 'ok',
+          result: setup.inspectResult ?? {
+            scope: 'summary',
+            scene: 'Scene',
+            totalObjects: 1,
+            applied: {},
+            summary: {
+              typeCounts: { MESH: 1 },
+              collections: { total: 0, master: 1, unassigned: 0, top: [] },
+              materials: 0,
+              lights: 0,
+              cameras: 0,
+            },
+            paging: { totalMatched: 1, returned: 1, offset: 0, nextOffset: null, truncated: false },
+            items: [{ name: 'Cube', type: 'MESH' }],
+          },
+        },
+      }
+    }
     throw new Error(`unexpected code sent to Blender: ${code.slice(0, 40)}`)
   }
 
@@ -219,7 +249,7 @@ function makeBridge(setup) {
     helperMaxOutputChars: 200000,
     enableMaintenanceHelpers: false,
   }
-  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, sentOptions, snapshotFiles, pushes: () => pushes }
+  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, sentOptions, snapshotFiles, inspectParams, pushes: () => pushes }
 }
 
 async function makeProject() {
@@ -1003,4 +1033,95 @@ test('a Python helper reuses the last known .blend directory', async () => {
   )
   assert.equal(value.status, 'ok')
   await access(path.join(blendDir, '.dsh-blender-lamp', 'outputs', 'fit-repair-queue-out.json'))
+})
+
+test('inspect sends one scoped query without a handshake or a task directory', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sent, inspectParams } = makeBridge({ blendPath, workspaceDir: root })
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(inspectTool)
+
+  const value = await inspectTool.execute({}, { agent: { session: { id: 's1' } } })
+  assert.equal(value.scope, 'summary')
+  assert.equal(value.paging.returned, 1)
+  assert.deepEqual(value.items, [{ name: 'Cube', type: 'MESH' }])
+  assert.equal(sent.length, 1, 'inspect must not run a handshake')
+  assert.deepEqual(inspectParams, [
+    { scope: 'summary', name: '', type: '', collection: '', collectionDeep: true, include: [], limit: 20, offset: 0 },
+  ])
+  await assert.rejects(access(path.join(blendPath, '..', '.dsh-blender-lamp')))
+})
+
+test('inspect forwards filters, include and paging', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, inspectParams } = makeBridge({ blendPath, workspaceDir: root })
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(inspectTool)
+
+  await inspectTool.execute(
+    {
+      scope: 'objects',
+      name: 'TJ_*',
+      type: 'mesh',
+      collection: 'TJ_Library',
+      collectionDeep: false,
+      include: ['transform', 'materials'],
+      limit: 2,
+      offset: 3,
+    },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.deepEqual(inspectParams, [
+    {
+      scope: 'objects',
+      name: 'TJ_*',
+      type: 'MESH',
+      collection: 'TJ_Library',
+      collectionDeep: false,
+      include: ['transform', 'materials'],
+      limit: 2,
+      offset: 3,
+    },
+  ])
+})
+
+test('inspect rejects bad arguments before touching Blender', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(inspectTool)
+  const exec = { agent: { session: { id: 's1' } } }
+
+  await assert.rejects(inspectTool.execute({ limit: 0 }, exec), /limit must be an integer between 1 and 200/)
+  await assert.rejects(inspectTool.execute({ limit: 201 }, exec), /limit/)
+  await assert.rejects(inspectTool.execute({ offset: -1 }, exec), /offset must be an integer >= 0/)
+  await assert.rejects(inspectTool.execute({ scope: 'render' }, exec))
+  await assert.rejects(inspectTool.execute({ include: ['transform', 'nope'] }, exec))
+  assert.equal(sent.length, 0)
+})
+
+test('inspect reports a Blender-side error instead of a fake success', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root, inspectFails: true })
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(inspectTool)
+
+  const value = await inspectTool.execute({}, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'error')
+  assert.equal(value.error.message, 'boom')
+})
+
+test('inspect renders its reply as compact lines', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root })
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(inspectTool)
+
+  const value = await inspectTool.execute({}, { agent: { session: { id: 's1' } } })
+  const blocks = inspectTool.output?.render({}, value) ?? []
+  const text = blocks.map((block) => String(block.text)).join('\n')
+  assert.match(text, /Scene: Scene · 1 objects/)
+  assert.match(text, /Types: MESH 1/)
+  assert.match(text, /Sample objects \(1 of 1, offset 0\):/)
+  assert.match(text, /- Cube \[MESH\]/)
 })
