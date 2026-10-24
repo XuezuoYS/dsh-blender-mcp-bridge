@@ -26,6 +26,7 @@ import {
 import { createSnapshotTracker } from '../lib/snapshotPolicy.js'
 import { ensureTaskDir } from '../lib/taskDir.js'
 import { makeTools } from '../lib/tools.js'
+import { createTestHelperEnv } from './support/testPython.js'
 
 /**
  * Minimal valid PNG header with the given dimensions.
@@ -207,7 +208,7 @@ function makeBridge(setup) {
     noteTimeout() {},
     clearTimeoutNote() {},
     helpersDir: path.resolve('helpers'),
-    pythonConfig: { analysisPython: '', autoDetectPython: true },
+    helperEnv: createTestHelperEnv().helperEnv,
     helperTimeoutMs: 120000,
     helperMaxOutputChars: 200000,
     enableMaintenanceHelpers: false,

@@ -12,6 +12,7 @@ import { test } from 'node:test'
 import { buildHelperCommand, getHelper, listHelpers, validateHelperArgs } from '../lib/helperCatalog.js'
 import { runBlenderHelper, runPythonHelper } from '../lib/helperRunner.js'
 import { ensureTaskDir } from '../lib/taskDir.js'
+import { findTestPython } from './support/testPython.js'
 
 const HELPERS_DIR = path.resolve('helpers')
 
@@ -131,7 +132,12 @@ test('multiview helper exposes per-view inputs and writes overlays into the task
   assert.ok(overlay.path.startsWith(taskDir))
 })
 
-test('a failed Python helper keeps stderr in the error', async () => {
+test('a failed Python helper keeps stderr in the error', async (t) => {
+  const python = await findTestPython()
+  if (python === null) {
+    t.skip('no local Python 3.10+ interpreter')
+    return
+  }
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
   const workspaceDir = path.join(root, 'workspace')
   const blendDir = path.join(root, 'project')
@@ -146,7 +152,7 @@ test('a failed Python helper keeps stderr in the error', async () => {
     args: { 'fit-report': 'bad.json', out: 'queue.json' },
     roots: { workspaceDir, blendDir, taskDir: taskDirInfo.dir },
     helpersDir: HELPERS_DIR,
-    pythonConfig: { analysisPython: '', autoDetectPython: true },
+    python,
     timeoutMs: 30000,
     maxOutputChars: 100000,
   })
@@ -155,7 +161,12 @@ test('a failed Python helper keeps stderr in the error', async () => {
   assert.ok(error.message && error.message.length > 0)
 })
 
-test('a pure-Python helper runs end to end and writes inside the task directory', async () => {
+test('a pure-Python helper runs end to end and writes inside the task directory', async (t) => {
+  const python = await findTestPython()
+  if (python === null) {
+    t.skip('no local Python 3.10+ interpreter')
+    return
+  }
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
   const workspaceDir = path.join(root, 'workspace')
   const blendDir = path.join(root, 'project')
@@ -170,7 +181,7 @@ test('a pure-Python helper runs end to end and writes inside the task directory'
     args: { 'fit-report': 'fit.json', out: 'queue.json' },
     roots: { workspaceDir, blendDir, taskDir: taskDirInfo.dir },
     helpersDir: HELPERS_DIR,
-    pythonConfig: { analysisPython: '', autoDetectPython: true },
+    python,
     timeoutMs: 30000,
     maxOutputChars: 100000,
   })
@@ -215,7 +226,12 @@ test('the Blender helper defaults to every mesh in the scene', async () => {
   assert.equal((/** @type {any} */ (result.report)).objects.length, 1)
 })
 
-test('an input outside all allowed roots is refused', async () => {
+test('an input outside all allowed roots is refused', async (t) => {
+  const python = await findTestPython()
+  if (python === null) {
+    t.skip('no local Python 3.10+ interpreter')
+    return
+  }
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-helper-'))
   const taskDirInfo = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
   const helper = /** @type {import('../lib/helperCatalog.js').HelperSpec} */ (getHelper('fit-repair-queue'))
@@ -225,7 +241,7 @@ test('an input outside all allowed roots is refused', async () => {
       args: { 'fit-report': '../../escape.json', out: 'queue.json' },
       roots: { workspaceDir: path.join(root, 'workspace'), blendDir: '', taskDir: taskDirInfo.dir },
       helpersDir: HELPERS_DIR,
-      pythonConfig: { analysisPython: '', autoDetectPython: true },
+      python,
       timeoutMs: 30000,
       maxOutputChars: 100000,
     }),

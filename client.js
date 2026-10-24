@@ -17,6 +17,10 @@ window.__ModuleLoader__.load({
     const NS = 'blenderBridge'
     /** Loader entry id, also the settings namespace and slot key. */
     const ENTRY_ID = 'dsh-blender-mcp-bridge'
+    /** Host route that reports and installs the managed helper environment. */
+    const ENV_ENDPOINT = '/api/blender-bridge/helper-env'
+    /** Display order for the four pinned packages. */
+    const PACKAGE_ORDER = ['numpy', 'Pillow', 'opencv-python-headless', 'scipy']
 
     /** @type {Record<string, string>} */
     const zh = {
@@ -37,8 +41,10 @@ window.__ModuleLoader__.load({
       sectionSafetyHint: '守卫会拦截保存文件、退出 Blender、修改偏好等明显危险的调用。',
       sectionTask: '任务目录',
       sectionTaskHint: '插件只允许在任务目录内写文件；这里决定任务目录落在哪。',
+      sectionHelperEnv: 'Python 辅助环境',
+      sectionHelperEnvHint: '分析类 helper 共用这一套固定环境；装一次，之后自动识别，不再查找本机其它 Python。',
       sectionAdvanced: '高级与辅助分析',
-      sectionAdvancedHint: '一般保持默认即可；修改 Python 路径前请确认解释器可用。',
+      sectionAdvancedHint: '一般保持默认即可；helper 超时、输出上限和维护类开关只在排查问题时调整。',
       advancedShow: '展开高级设置',
       advancedHide: '收起高级设置',
       fieldHost: '监听地址',
@@ -77,10 +83,10 @@ window.__ModuleLoader__.load({
       taskRootModeHint: '跟随 .blend：放在工程旁边；跟随工作区：放在当前工作区。',
       fieldTaskRoot: '自定义根目录',
       taskRootHint: '填写后优先使用；留空则按上面的模式自动选择。',
-      fieldHelperAutoDetect: '自动查找 Python',
-      helperAutoDetectHint: '让辅助脚本自己寻找可用的 Python 解释器。',
-      fieldHelperPython: 'Python 路径',
-      helperPythonHint: '留空使用自动查找；也可以指定完整路径。',
+      fieldHelperBasePython: '底座 Python',
+      helperBasePythonHint: '留空使用 Blender 自带的 Python；只在创建环境时使用。',
+      fieldHelperPipIndex: 'pip 镜像',
+      helperPipIndexHint: '留空使用 PyPI；可以填公司镜像或代理镜像。',
       fieldHelperTimeout: '辅助脚本超时',
       helperTimeoutHint: '分析类 helper 的最长运行时间，单位秒。',
       fieldHelperOutput: '辅助脚本输出上限',
@@ -127,7 +133,47 @@ window.__ModuleLoader__.load({
       rangeMinInt: '至少 {min} 字符',
       placeholderHost: '127.0.0.1',
       placeholderTaskRoot: '留空自动选择',
-      placeholderPython: '留空自动查找',
+      placeholderBasePython: '留空使用 Blender 自带 Python',
+      placeholderPipIndex: '留空使用 PyPI',
+      envBadgeReady: '辅助环境就绪',
+      envBadgeInstalling: '辅助环境安装中',
+      envBadgeAttention: '辅助环境待安装',
+      envStateMissing: '未安装',
+      envStateIncomplete: '不完整',
+      envStateBroken: '需要重建',
+      envStateOutdated: '需要更新',
+      envStateReady: '就绪',
+      envStateInstalling: '安装中',
+      envStateUnavailable: '状态不可用',
+      envLoading: '正在读取环境状态…',
+      envInstall: '安装辅助环境',
+      envRepair: '修复辅助环境',
+      envRebuild: '重建',
+      envRecheck: '重新检测',
+      envInstalling: '安装中',
+      envPathLabel: '环境位置',
+      envBaseLabel: '底座',
+      envPackagesLabel: '已装版本',
+      envMissingLabel: '缺少',
+      envPlanTitle: '安装内容',
+      envPlanSize: '约 {download} MB 下载、{disk} MB 磁盘',
+      envLogTitle: '安装日志',
+      envLogPathLabel: '日志',
+      envCloseHint: '可以关掉这个页面，安装在后台继续。',
+      envDirtyHint: '有未保存的环境设置，安装会使用已保存的值。',
+      envCommandHint: '也可以在插件目录运行下面的命令：',
+      envFallbackTitle: '读不到环境状态',
+      envFallbackHint: '当前宿主没有提供设置页通道；请用下面的命令安装。',
+      envErrorTitle: '操作失败',
+      envBaseUnknown: '未知（安装时连接 Blender，或填写底座路径）',
+      envBaseBlender: 'Blender 自带',
+      envBaseConfig: '配置指定',
+      envBaseSaved: '上次记录',
+      envBaseInstalled: '安装时记录',
+      envLastFailed: '上次安装失败',
+      envInterrupted: '上次安装被中断，请重试。',
+      envHelperCount: 'helper {ready}/{total} 个可用',
+      envNeedBlender: '需要 Blender 在线，或先填写底座 Python。',
       ariaToggle: '切换 {label}',
       ariaDecrease: '减少 {label}',
       ariaIncrease: '增加 {label}',
@@ -154,8 +200,10 @@ window.__ModuleLoader__.load({
       sectionSafetyHint: 'The guard blocks obvious dangerous calls such as saving, quitting, or changing preferences.',
       sectionTask: 'Task directory',
       sectionTaskHint: 'The plugin writes only inside its task directory; this decides where that directory lives.',
+      sectionHelperEnv: 'Python helper environment',
+      sectionHelperEnvHint: 'All analysis helpers share this one managed environment. Install it once; it never searches other Pythons on the machine.',
       sectionAdvanced: 'Advanced and helper analysis',
-      sectionAdvancedHint: 'Leave these alone unless you know the interpreter or script needs them.',
+      sectionAdvancedHint: 'Leave these alone unless you are troubleshooting helper timeouts, output caps or maintenance helpers.',
       advancedShow: 'Show advanced settings',
       advancedHide: 'Hide advanced settings',
       fieldHost: 'Host',
@@ -194,10 +242,10 @@ window.__ModuleLoader__.load({
       taskRootModeHint: 'Beside the .blend: next to the project; Workspace: inside the current workspace.',
       fieldTaskRoot: 'Custom root',
       taskRootHint: 'Used when set; leave empty to follow the mode above.',
-      fieldHelperAutoDetect: 'Find Python automatically',
-      helperAutoDetectHint: 'Let helper scripts discover a usable Python interpreter.',
-      fieldHelperPython: 'Python path',
-      helperPythonHint: 'Leave empty to auto-detect, or point at a full interpreter path.',
+      fieldHelperBasePython: 'Base Python',
+      helperBasePythonHint: 'Empty uses Blender\'s bundled Python; it is only used when creating the environment.',
+      fieldHelperPipIndex: 'pip index',
+      helperPipIndexHint: 'Empty uses PyPI; set a company or proxy mirror when needed.',
       fieldHelperTimeout: 'Helper timeout',
       helperTimeoutHint: 'Longest run time for an analysis helper, in seconds.',
       fieldHelperOutput: 'Helper output cap',
@@ -244,7 +292,47 @@ window.__ModuleLoader__.load({
       rangeMinInt: 'At least {min} characters',
       placeholderHost: '127.0.0.1',
       placeholderTaskRoot: 'Empty to choose automatically',
-      placeholderPython: 'Empty to detect automatically',
+      placeholderBasePython: 'Empty uses Blender\'s bundled Python',
+      placeholderPipIndex: 'Empty uses PyPI',
+      envBadgeReady: 'Helper env ready',
+      envBadgeInstalling: 'Helper env installing',
+      envBadgeAttention: 'Helper env needs setup',
+      envStateMissing: 'Not installed',
+      envStateIncomplete: 'Incomplete',
+      envStateBroken: 'Needs rebuild',
+      envStateOutdated: 'Needs update',
+      envStateReady: 'Ready',
+      envStateInstalling: 'Installing',
+      envStateUnavailable: 'Status unavailable',
+      envLoading: 'Reading the environment status…',
+      envInstall: 'Install helper environment',
+      envRepair: 'Repair helper environment',
+      envRebuild: 'Rebuild',
+      envRecheck: 'Recheck',
+      envInstalling: 'Installing',
+      envPathLabel: 'Location',
+      envBaseLabel: 'Base',
+      envPackagesLabel: 'Installed',
+      envMissingLabel: 'Missing',
+      envPlanTitle: 'Will install',
+      envPlanSize: 'about {download} MB download, {disk} MB disk',
+      envLogTitle: 'Install log',
+      envLogPathLabel: 'Log',
+      envCloseHint: 'You can close this page; the install continues in the background.',
+      envDirtyHint: 'Some environment settings are unsaved; the install uses the saved values.',
+      envCommandHint: 'You can also run this command in the plugin directory:',
+      envFallbackTitle: 'Environment status is unavailable',
+      envFallbackHint: 'This host does not expose the settings channel; use the command below to install.',
+      envErrorTitle: 'Action failed',
+      envBaseUnknown: 'Unknown (connect Blender at install time, or set a base path)',
+      envBaseBlender: 'Blender bundled',
+      envBaseConfig: 'Configured',
+      envBaseSaved: 'Last seen',
+      envBaseInstalled: 'Recorded at install',
+      envLastFailed: 'Last install failed',
+      envInterrupted: 'Last install was interrupted; try again.',
+      envHelperCount: '{ready}/{total} helpers available',
+      envNeedBlender: 'Blender must be online, or set a base Python first.',
       ariaToggle: 'Toggle {label}',
       ariaDecrease: 'Decrease {label}',
       ariaIncrease: 'Increase {label}',
@@ -275,8 +363,8 @@ window.__ModuleLoader__.load({
       { key: 'auditStoreCode', path: ['audit', 'storeCode'], kind: 'bool', label: 'fieldStoreCode', hint: 'storeCodeHint', group: 'safety', sub: true },
       { key: 'taskRootMode', path: ['taskRootMode'], kind: 'enum', label: 'fieldTaskRootMode', hint: 'taskRootModeHint', group: 'task', options: ['blendFile', 'workspace'] },
       { key: 'taskRoot', path: ['taskRoot'], kind: 'text', label: 'fieldTaskRoot', hint: 'taskRootHint', group: 'task', block: true, placeholder: 'placeholderTaskRoot' },
-      { key: 'helperAutoDetectPython', path: ['helper', 'autoDetectPython'], kind: 'bool', label: 'fieldHelperAutoDetect', hint: 'helperAutoDetectHint', group: 'advanced' },
-      { key: 'helperAnalysisPython', path: ['helper', 'analysisPython'], kind: 'text', label: 'fieldHelperPython', hint: 'helperPythonHint', group: 'advanced', block: true, placeholder: 'placeholderPython' },
+      { key: 'helperBasePython', path: ['helper', 'basePython'], kind: 'text', label: 'fieldHelperBasePython', hint: 'helperBasePythonHint', group: 'helperEnv', block: true, placeholder: 'placeholderBasePython' },
+      { key: 'helperPipIndex', path: ['helper', 'pipIndexUrl'], kind: 'text', label: 'fieldHelperPipIndex', hint: 'helperPipIndexHint', group: 'helperEnv', block: true, placeholder: 'placeholderPipIndex' },
       { key: 'helperTimeoutMs', path: ['helper', 'timeoutMs'], kind: 'seconds', label: 'fieldHelperTimeout', hint: 'helperTimeoutHint', min: 1, group: 'advanced' },
       { key: 'helperMaxOutputChars', path: ['helper', 'maxOutputChars'], kind: 'int', label: 'fieldHelperOutput', hint: 'helperOutputHint', min: 1000, group: 'advanced', display: 'input', width: 'port' },
       { key: 'helperMaintenance', path: ['helper', 'enableMaintenanceHelpers'], kind: 'bool', label: 'fieldMaintenance', hint: 'maintenanceHint', group: 'advanced' },
@@ -289,6 +377,7 @@ window.__ModuleLoader__.load({
       { id: 'snapshot', title: 'sectionSnapshot', hint: 'sectionSnapshotHint', icon: 'camera' },
       { id: 'safety', title: 'sectionSafety', hint: 'sectionSafetyHint', icon: 'shield' },
       { id: 'task', title: 'sectionTask', hint: 'sectionTaskHint', icon: 'folder' },
+      { id: 'helperEnv', title: 'sectionHelperEnv', hint: 'sectionHelperEnvHint', icon: 'spark' },
     ]
     const ADVANCED_GROUP = { id: 'advanced', title: 'sectionAdvanced', hint: 'sectionAdvancedHint', icon: 'spark' }
     const ENUM_LABELS = {
@@ -364,6 +453,23 @@ window.__ModuleLoader__.load({
 .bb-chevron { flex: none; transition: transform .15s ease; }
 .bb-advancedToggle[aria-expanded="true"] .bb-chevron { transform: rotate(90deg); }
 .bb-advanced { animation: bb-reveal .16s ease-out; }
+.bb-envCard { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 12px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-2); }
+.bb-envHead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.bb-envDot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--dsw-alias-label-secondary); }
+.bb-envCard[data-state="ready"] .bb-envDot { background: var(--dsw-alias-state-success-primary); }
+.bb-envCard[data-state="missing"] .bb-envDot, .bb-envCard[data-state="incomplete"] .bb-envDot, .bb-envCard[data-state="broken"] .bb-envDot, .bb-envCard[data-state="outdated"] .bb-envDot { background: var(--dsw-alias-state-warn-primary); }
+.bb-envState { font-size: 13px; font-weight: 600; }
+.bb-envMeta { color: color-mix(in srgb, var(--dsw-alias-label-secondary) 72%, transparent); font-size: 11.5px; }
+.bb-envGrid { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 10px; font-size: 11.5px; line-height: 17px; }
+.bb-envKey { color: color-mix(in srgb, var(--dsw-alias-label-secondary) 66%, transparent); }
+.bb-envValue { color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.bb-envValue code, .bb-envCode { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.bb-envNote { color: color-mix(in srgb, var(--dsw-alias-label-secondary) 72%, transparent); font-size: 12px; line-height: 18px; }
+.bb-envLog { margin: 0; max-height: 160px; overflow: auto; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bb-envActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.bb-envCard[data-tone="error"] { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 38%, transparent); }
+.bb-envError { color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.bb-envActions .bb-btn { height: 32px; }
 @keyframes bb-reveal { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
 .bb-savebar { position: sticky; bottom: 12px; z-index: 3; display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 10px 14px; margin: 0 14px 14px; padding: 12px 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--dsw-alias-label-primary) 30%, transparent), 0 2px 6px -2px color-mix(in srgb, var(--dsw-alias-label-primary) 16%, transparent); }
 .bb-saveMeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -405,6 +511,8 @@ window.__ModuleLoader__.load({
   .bb-seg { max-width: 100%; }
   .bb-seg button { flex: 1 1 auto; }
   .bb-row.bb-sub { margin-left: 18px; }
+  .bb-envCard { margin-left: 0; }
+  .bb-envGrid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bb-toggle::after, .bb-chevron, .bb-advanced { transition: none; animation: none; }
@@ -886,6 +994,225 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Read and poll the managed helper environment status.
+     *
+     * @returns {{ env: any, error: string, busy: boolean, install: (action: string) => Promise<void>, recheck: () => void }} status and actions
+     */
+    function useHelperEnvStatus() {
+      const [env, setEnv] = React.useState(null)
+      const [error, setError] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const alive = React.useRef(true)
+
+      const load = React.useCallback(async (refresh) => {
+        try {
+          const response = await fetch(`${ENV_ENDPOINT}${refresh ? '?refresh=1' : ''}`, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const value = await response.json()
+          if (!alive.current) return
+          setEnv(value)
+          setError('')
+        } catch (failure) {
+          if (!alive.current) return
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      React.useEffect(() => {
+        alive.current = true
+        void load(false)
+        return () => {
+          alive.current = false
+        }
+      }, [load])
+
+      const running = env !== null && env.install !== undefined && env.install.state === 'running'
+      React.useEffect(() => {
+        if (!running) return undefined
+        const timer = window.setInterval(() => {
+          void load(false)
+        }, 2000)
+        return () => window.clearInterval(timer)
+      }, [running, load])
+
+      const install = React.useCallback(
+        async (action) => {
+          setBusy(true)
+          setError('')
+          try {
+            const response = await fetch(ENV_ENDPOINT, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ action }),
+            })
+            const value = await response.json().catch(() => null)
+            if (!response.ok) {
+              const message = value && value.error && value.error.message ? String(value.error.message) : `HTTP ${response.status}`
+              throw new Error(message)
+            }
+            await load(false)
+          } catch (failure) {
+            setError(failure instanceof Error ? failure.message : String(failure))
+          } finally {
+            setBusy(false)
+          }
+        },
+        [load],
+      )
+
+      const recheck = React.useCallback(() => {
+        void load(true)
+      }, [load])
+
+      return { env, error, busy, install, recheck }
+    }
+
+    /** @param {string} state @returns {string} locale key */
+    function envStateKey(state) {
+      if (state === 'missing') return 'envStateMissing'
+      if (state === 'incomplete') return 'envStateIncomplete'
+      if (state === 'broken') return 'envStateBroken'
+      if (state === 'outdated') return 'envStateOutdated'
+      if (state === 'ready') return 'envStateReady'
+      return 'envStateUnavailable'
+    }
+
+    /** @param {string} source @returns {string} locale key */
+    function envBaseSourceKey(source) {
+      if (source === 'blender') return 'envBaseBlender'
+      if (source === 'config') return 'envBaseConfig'
+      if (source === 'saved') return 'envBaseSaved'
+      if (source === 'installed') return 'envBaseInstalled'
+      return 'envBaseUnknown'
+    }
+
+    /** @param {any} props @returns {any} */
+    function HelperEnvCard({ t, env, error, busy, install, recheck, dirtyConfig }) {
+      if (env === null) {
+        if (error !== '') {
+          return h(
+            'div',
+            { className: 'bb-envCard', 'data-tone': 'error' },
+            h('div', { className: 'bb-envHead' }, h('span', { className: 'bb-envDot' }), h('strong', { className: 'bb-envState' }, t('envFallbackTitle'))),
+            h('div', { className: 'bb-envNote' }, t('envFallbackHint')),
+            h('code', { className: 'bb-envCode' }, 'node scripts/setupAnalysis.js'),
+            h('div', { className: 'bb-envError' }, `${t('envErrorTitle')}: ${error}`),
+          )
+        }
+        return h('div', { className: 'bb-envCard' }, h('div', { className: 'bb-envNote' }, t('envLoading')))
+      }
+
+      const state = typeof env.state === 'string' ? env.state : 'missing'
+      const installState = env.install && typeof env.install.state === 'string' ? env.install.state : 'idle'
+      const running = installState === 'running'
+      const base = env.base !== null && typeof env.base === 'object' ? env.base : {}
+      const missing = Array.isArray(env.missing) ? env.missing : []
+      const packages = env.packages !== null && typeof env.packages === 'object' ? env.packages : {}
+      const planPackages =
+        env.requirements && env.requirements.packages && typeof env.requirements.packages === 'object'
+          ? Object.entries(env.requirements.packages)
+              .map(([name, version]) => `${name} ${String(version)}`)
+              .join(', ')
+          : ''
+      const downloadMb = Math.round(Number(env.estimates?.downloadBytes ?? 0) / 1e6)
+      const diskMb = Math.round(Number(env.estimates?.diskBytes ?? 0) / 1e6)
+      const baseText =
+        base.valid === true
+          ? `${String(base.python)} · Python ${String(base.version)}${base.blenderVersion ? ` · Blender ${String(base.blenderVersion)}` : ''} · ${t(envBaseSourceKey(String(base.source)))}`
+          : t('envBaseUnknown')
+      const packageText = PACKAGE_ORDER.map((name) => `${name} ${typeof packages[name] === 'string' ? packages[name] : '—'}`).join(', ')
+      const primaryKey = state === 'broken' ? 'envRebuild' : state === 'ready' ? '' : state === 'incomplete' || state === 'outdated' ? 'envRepair' : 'envInstall'
+
+      return h(
+        'div',
+        { className: 'bb-envCard', 'data-state': state, 'data-tone': installState === 'failed' ? 'error' : undefined },
+        h(
+          'div',
+          { className: 'bb-envHead' },
+          h('span', { className: 'bb-envDot' }),
+          h('strong', { className: 'bb-envState' }, t(running ? 'envStateInstalling' : envStateKey(state))),
+          env.helpers
+            ? h('span', { className: 'bb-envMeta' }, t('envHelperCount', { ready: env.helpers.ready, total: env.helpers.total }))
+            : null,
+          running && env.install.phase
+            ? h('span', { className: 'bb-envMeta' }, `${String(env.install.phase)} · ${Math.round(Number(env.install.elapsedMs ?? 0) / 1000)}s`)
+            : null,
+        ),
+        h(
+          'div',
+          { className: 'bb-envGrid' },
+          h('span', { className: 'bb-envKey' }, t('envPathLabel')),
+          h('span', { className: 'bb-envValue' }, h('code', null, String(env.venvPath ?? ''))),
+          h('span', { className: 'bb-envKey' }, t('envBaseLabel')),
+          h('span', { className: 'bb-envValue' }, baseText),
+          h('span', { className: 'bb-envKey' }, t('envPackagesLabel')),
+          h('span', { className: 'bb-envValue' }, packageText),
+          missing.length > 0 ? h('span', { className: 'bb-envKey' }, t('envMissingLabel')) : null,
+          missing.length > 0 ? h('span', { className: 'bb-envValue' }, missing.join(', ')) : null,
+        ),
+        env.usable !== true && !running
+          ? h(
+              'div',
+              { className: 'bb-envNote' },
+              `${t('envPlanTitle')}: ${planPackages || '—'} · ${t('envPlanSize', { download: downloadMb, disk: diskMb })}`,
+              h('div', null, t('envCommandHint')),
+              h('code', { className: 'bb-envCode' }, String(env.hints?.installCommand ?? '')),
+            )
+          : null,
+        installState === 'failed' && env.install.error
+          ? h('div', { className: 'bb-envError' }, `${t('envLastFailed')}: ${String(env.install.error.message)}`)
+          : null,
+        installState === 'interrupted' ? h('div', { className: 'bb-envError' }, t('envInterrupted')) : null,
+        error !== '' ? h('div', { className: 'bb-envError' }, `${t('envErrorTitle')}: ${error}`) : null,
+        running ? h('pre', { className: 'bb-envLog' }, (Array.isArray(env.install.logTail) ? env.install.logTail : []).join('\n')) : null,
+        running ? h('div', { className: 'bb-envNote' }, t('envCloseHint')) : null,
+        h(
+          'div',
+          { className: 'bb-envActions' },
+          primaryKey !== '' && !running
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'bb-btn bb-primary',
+                  disabled: busy,
+                  onClick: () => {
+                    void install(state === 'broken' ? 'rebuild' : 'install')
+                  },
+                },
+                t(primaryKey),
+              )
+            : null,
+          state !== 'missing' && state !== 'broken' && !running
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'bb-btn',
+                  disabled: busy,
+                  onClick: () => {
+                    void install('rebuild')
+                  },
+                },
+                t('envRebuild'),
+              )
+            : null,
+          h(
+            'button',
+            { type: 'button', className: 'bb-btn', disabled: busy || running, onClick: recheck },
+            t('envRecheck'),
+          ),
+          dirtyConfig && !running ? h('span', { className: 'bb-envMeta' }, t('envDirtyHint')) : null,
+          !running && env.usable !== true && base.valid !== true ? h('span', { className: 'bb-envMeta' }, t('envNeedBlender')) : null,
+        ),
+      )
+    }
+
     /** @param {any} props @returns {any} */
     function SettingsPanel({ t, form, locale }) {
       const subscribe = React.useCallback((listener) => form.subscribe(listener), [form])
@@ -901,6 +1228,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('')
       /** Locale revisions are not rendered; they only force a fresh translation. */
       const [, setLocaleRevision] = React.useState(0)
+      const envStatus = useHelperEnvStatus()
 
       const ready = snapshot.status === 'ready' && snapshot.value !== undefined && snapshot.value !== null
       const current = draft !== null ? draft : snapshot.value
@@ -1014,32 +1342,55 @@ window.__ModuleLoader__.load({
       }
 
       /** @param {any} group @param {boolean} isAdvanced @returns {any} */
-      const renderGroup = (group, isAdvanced) =>
-        h(
-          Section,
-          { key: group.id, t, group },
-          FIELDS.filter((field) => field.group === group.id).map((field) => {
-            const value = getIn(current, field.path)
-            return h(FieldRow, {
-              key: field.key,
+      const renderGroup = (group, isAdvanced) => {
+        const rows = FIELDS.filter((field) => field.group === group.id).map((field) => {
+          const value = getIn(current, field.path)
+          return h(FieldRow, {
+            key: field.key,
+            t,
+            field,
+            value,
+            saved: getIn(snapshot.value, field.path),
+            base: snapshot.base,
+            error: invalid[field.key] ?? '',
+            dirty: changedKeys.has(field.key),
+            disabled,
+            onChange: (next) => update(field, next),
+          })
+        })
+        if (!isAdvanced && group.id === 'helperEnv') {
+          rows.unshift(
+            h(HelperEnvCard, {
+              key: 'helperEnvCard',
               t,
-              field,
-              value,
-              saved: getIn(snapshot.value, field.path),
-              base: snapshot.base,
-              error: invalid[field.key] ?? '',
-              dirty: changedKeys.has(field.key),
-              disabled,
-              onChange: (next) => update(field, next),
-            })
-          }),
-        )
+              env: envStatus.env,
+              error: envStatus.error,
+              busy: envStatus.busy,
+              install: envStatus.install,
+              recheck: envStatus.recheck,
+              dirtyConfig: changedKeys.has('helperBasePython') || changedKeys.has('helperPipIndex'),
+            }),
+          )
+        }
+        return h(Section, { key: group.id, t, group }, rows)
+      }
 
       const facts = [
         { key: 'save', icon: 'shield', text: t('factSave') },
         { key: 'snapshot', icon: 'camera', text: t('factSnapshot') },
         { key: 'timeout', icon: 'clock', text: t('factTimeout') },
       ]
+
+      const envBadge =
+        envStatus.env === null
+          ? null
+          : (() => {
+              const installState = envStatus.env.install && envStatus.env.install.state
+              const ready = envStatus.env.state === 'ready'
+              const key = installState === 'running' ? 'envBadgeInstalling' : ready ? 'envBadgeReady' : 'envBadgeAttention'
+              const tone = installState === 'running' ? 'brand' : ready ? 'success' : undefined
+              return h('span', { className: 'bb-pill', 'data-tone': tone }, h('span', { className: 'bb-dot' }), t(key))
+            })()
 
       const advancedToggle = h(
         'button',
@@ -1086,6 +1437,7 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'bb-badges' },
             h('span', { className: 'bb-pill', 'data-tone': 'success' }, h('span', { className: 'bb-dot' }), t('badgeLive')),
+            envBadge,
             nonDefault ? h('span', { className: 'bb-pill' }, t('badgeCustom')) : null,
           ),
         ),

@@ -62,7 +62,7 @@ v1 自带 `create-3d-model` 技能库的 26 个 helper，不依赖 `dsh-blender`
 - 23 个常规 helper 纳入 `blender_mcp_helpers` / `blender_mcp_helper` 两个工具，不是 23 个独立工具；
 - 3 个维护类 helper（`skill-graph-audit`、`release-readiness-check`、`sanitize-skill-contributions`）随包保留，但默认隐藏，只有打开 `enableMaintenanceHelpers` 才可用；
 - 本插件自己的 `blender_mcp_helpers` / `blender_mcp_helper` 负责列出和运行 helper；
-- Python 解释器、依赖清单、安装脚本都由本插件管理，不共享 `dsh-blender` 的 `.venv`。
+- Python 底座用 Blender 自带的那份，装进插件自己的固定 venv（`DSH_HOME/dsh-blender-mcp-bridge/python/venv`）；依赖清单、安装脚本都由本插件管理，不共享 `dsh-blender` 的 `.venv`，也不搜索别的 Python。
 
 详细设计见 [`helper-runtime.md`](helper-runtime.md)。
 

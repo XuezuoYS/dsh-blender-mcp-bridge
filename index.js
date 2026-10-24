@@ -14,6 +14,10 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import { listHelpers } from './lib/helperCatalog.js'
+import { createHelperEnv, defaultDshHome } from './lib/helperEnv.js'
+import { createHelperEnvHandlers, HELPER_ENV_PATH } from './lib/helperEnvRoutes.js'
+import { handshake } from './lib/handshake.js'
 import { sendExecute } from './lib/protocol.js'
 import { createRenderStats } from './lib/renderStats.js'
 import { createSnapshotTracker } from './lib/snapshotPolicy.js'
@@ -61,8 +65,8 @@ export const Config = z.object({
     enabled: z.boolean().default(true).volatile(),
   }),
   helper: z.object({
-    analysisPython: z.string().default('').volatile(),
-    autoDetectPython: z.boolean().default(true).volatile(),
+    basePython: z.string().default('').volatile(),
+    pipIndexUrl: z.string().default('').volatile(),
     timeoutMs: z.natural().min(1000).default(120000).volatile(),
     maxOutputChars: z.natural().min(1000).default(200000).volatile(),
     enableMaintenanceHelpers: z.boolean().default(false).volatile(),
@@ -99,7 +103,8 @@ Ground rules:
 5. Do not change render settings on your own. When the user asks for a preview render, use their explicit width/height/samples. blender_mcp_render restores the settings and accepts timeoutMs (1 s to 30 min); for a long production render pass a larger timeoutMs or background: true. If a render returns status timeout or running, Blender keeps rendering: do not start another render (other Blender tools will time out too) — call blender_mcp_render_status with the jobId until it reports done or failed, then read the image.
 6. If something looks wrong — a write was blocked unexpectedly, the .blend changed on disk, a tool timed out, the guard self-check failed, the scene looks broken — stop, tell the user exactly what happened with the snapshot path, and end the turn. Never try to roll back or repair the damage yourself; rollback is the user's decision (Ctrl+Z or opening a snapshot).
 7. When unsure about a Blender API, read the English manual linked from status.docs.manualEn with web_fetch.
-8. The blender_* tools from dsh-blender work on background copies of .blend files; use them for batch work and analysis, not for the live session.`
+8. The blender_* tools from dsh-blender work on background copies of .blend files; use them for batch work and analysis, not for the live session.
+9. Helper Python environment: blender_mcp_helpers reports one managed environment at DSH_HOME/dsh-blender-mcp-bridge/python/venv. The plugin never installs it for you: when it is missing or incomplete, tell the user to open Settings → Blender MCP → Python helper environment (or run the setup command printed in the helper result) and never run pip install yourself. Dependency-free helpers may run on Blender's own Python; helpers with dependencies need the managed venv.`
 
 /**
  * Register tools and the system prompt section.
@@ -139,6 +144,29 @@ export function apply(ctx, config) {
   const timeoutNotes = new Set()
   /** @type {Map<string, string>} session id -> last known .blend path */
   const knownFilePaths = new Map()
+
+  const packageRoot = path.dirname(fileURLToPath(import.meta.url))
+  let packageVersion = ''
+  try {
+    packageVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version ?? ''
+  } catch {
+    packageVersion = ''
+  }
+  /**
+   * The helper environment manager. Construction is cheap: it only reads
+   * files when status/install is called and never probes a user-installed
+   * Python runtime.
+   */
+  const helperEnv = createHelperEnv({
+    dshHome: defaultDshHome(),
+    pluginRoot: packageRoot,
+    packageVersion,
+    getConfig: () => ({
+      basePython: liveValue(config.helper.basePython),
+      pipIndexUrl: liveValue(config.helper.pipIndexUrl),
+    }),
+    warn: (message) => ctx.logger.warn(message),
+  })
 
   ctx.on(
     'session/event',
@@ -300,13 +328,8 @@ export function apply(ctx, config) {
     get maxResponseChars() {
       return liveValue(config.maxResponseChars)
     },
-    helpersDir: path.join(path.dirname(fileURLToPath(import.meta.url)), 'helpers'),
-    get pythonConfig() {
-      return {
-        analysisPython: liveValue(config.helper.analysisPython),
-        autoDetectPython: liveValue(config.helper.autoDetectPython),
-      }
-    },
+    helpersDir: path.join(packageRoot, 'helpers'),
+    helperEnv,
     get helperTimeoutMs() {
       return liveValue(config.helper.timeoutMs)
     },
@@ -382,7 +405,59 @@ export function apply(ctx, config) {
     ctx.tools.register(tool)
   }
 
-  const packageRoot = path.dirname(fileURLToPath(import.meta.url))
+  ctx.effect(
+    () => () => helperEnv.dispose(),
+    'blender-bridge: helper environment lifecycle',
+  )
+
+  // Settings-page channel. It is a core connection Fetch route (the same
+  // authenticated mechanism the built-in /api/file route uses); hosts without
+  // that service (TUI, minimal SDK profiles) simply skip it and the settings
+  // card falls back to the CLI command.
+  ctx.inject(['connection'], (/** @type {any} */ connectionCtx) => {
+    const connection = connectionCtx.get('connection')
+    if (!connection || typeof connection.fetch?.register !== 'function') return
+    /**
+     * @param {AbortSignal} [signal] - request cancellation
+     * @returns {Promise<import('./lib/handshake.js').LiveSessionInfo | null>} live facts, when available
+     */
+    const probeBlenderFacts = async (signal) => {
+      if (liveValue(config.helper.basePython).trim() !== '') return null
+      const info = await handshake({
+        host: liveValue(config.host),
+        port: liveValue(config.port),
+        connectTimeoutMs: liveValue(config.connectTimeoutMs),
+        responseTimeoutMs: Math.min(liveValue(config.responseTimeoutMs), 15000),
+        maxResponseChars: liveValue(config.maxResponseChars),
+        signal,
+      })
+      helperEnv.noteBlenderSession(info)
+      return info
+    }
+    const handlers = createHelperEnvHandlers({
+      env: helperEnv,
+      getHelpers: () => listHelpers(liveValue(config.helper.enableMaintenanceHelpers)),
+      probeBlenderFacts,
+    })
+    connectionCtx.effect(
+      () => {
+        try {
+          return connection.fetch.register({
+            path: HELPER_ENV_PATH,
+            methods: ['GET', 'POST'],
+            requestBody: 'buffered',
+            fetch: (/** @type {Request} */ request) =>
+              request.method === 'POST' ? handlers.install(request) : handlers.status(request),
+          })
+        } catch (error) {
+          ctx.logger.warn(`helper environment route registration failed: ${error instanceof Error ? error.message : String(error)}`)
+          return () => {}
+        }
+      },
+      'blender-bridge: helper environment route',
+    )
+  })
+
   const skillDir = path.join(packageRoot, 'skills', 'blender-live-session')
   // Wait for the skills service instead of sampling it once during apply:
   // a service mounted later would otherwise leave the skill silently absent.
@@ -430,5 +505,8 @@ snapshot and the undo step). Automatic snapshots follow the snapshot policy
 (the first write of a turn, every few writes, and delete-like calls); the user
 opens a snapshot in Blender to go back. Renders accept a per-call timeoutMs and
 a background start; a render that outlives its call keeps running in Blender,
-so collect it with blender_mcp_render_status instead of rendering again. Never
-roll back by yourself: report the problem and end the turn.`
+so collect it with blender_mcp_render_status instead of rendering again. If
+blender_mcp_helpers reports the managed Python environment missing or
+incomplete, point the user at Settings → Blender MCP → Python helper
+environment and do not run pip install yourself. Never roll back by yourself:
+report the problem and end the turn.`

@@ -107,10 +107,17 @@ further back — the plugin never restores a snapshot by itself.
 ## Helpers
 
 `blender_mcp_helpers` lists 23 regular helpers (3 maintenance helpers stay
-hidden unless enabled). Arguments are validated against the catalog; inputs
-must be in the workspace, the `.blend` directory or the task directory;
-outputs land in the task directory. Read the helper result and inspect any
-image output.
+hidden unless enabled) and the status of the one managed Python environment.
+Arguments are validated against the catalog; inputs must be in the workspace,
+the `.blend` directory or the task directory; outputs land in the task
+directory. Read the helper result and inspect any image output.
+
+Helpers that need numpy, Pillow, OpenCV or SciPy use the plugin environment at
+`DSH_HOME/dsh-blender-mcp-bridge/python/venv`. When the result says it is
+missing, incomplete or broken, tell the user to open Settings → Blender MCP →
+Python helper environment and install it, or to run the printed setup command;
+never run `pip install` yourself. Dependency-free helpers can run on Blender's
+own Python in the meantime.
 
 ## References
 

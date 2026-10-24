@@ -14,7 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { wrapWithGuard } from '../lib/guardPayload.js'
-import { resolvePython } from '../lib/pythonRuntime.js'
+import { findTestPython } from './support/testPython.js'
 
 /** Minimal fake Blender with enough state for the guard and the fingerprint. */
 const DRIVER = `import json
@@ -132,17 +132,6 @@ with open(out_path, 'w', encoding='utf-8') as fh:
 
 /** Payload counter so each run gets its own files. */
 let payloadSeq = 0
-
-/**
- * @returns {Promise<import('../lib/pythonRuntime.js').PythonRuntime | null>} interpreter or null
- */
-async function findTestPython() {
-  try {
-    return await resolvePython({ analysisPython: '', autoDetectPython: true })
-  } catch {
-    return null
-  }
-}
 
 /**
  * @param {import('../lib/pythonRuntime.js').PythonRuntime} python - interpreter

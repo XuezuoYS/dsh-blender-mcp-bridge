@@ -20,19 +20,23 @@ subprocess runtime around them.
 
 - `surface_texture_coverage_audit.py` runs inside Blender through the plugin's
   trusted exec channel (read-only; no undo step, no snapshot).
-- Every other helper runs in a separate `analysisPython` process, spawned
-  without a shell. Outputs must land inside the task directory.
+- Every other helper runs in a separate Python process, spawned without a
+  shell. Helpers that need third-party packages use the plugin-managed venv at
+  `DSH_HOME/dsh-blender-mcp-bridge/python/venv`; dependency-free helpers may
+  run on Blender's bundled Python. Outputs must land inside the task directory.
 - `skill_graph_audit`, `release_readiness_check` and
   `sanitize_skill_contributions` are maintenance helpers; they stay hidden
   until `helper.enableMaintenanceHelpers` is turned on.
 
 ## Installing dependencies
 
-Use the plugin script (creates `.venv` and installs
-`requirements-analysis.txt`):
+The user installs the environment from the plugin settings
+(Settings → Blender MCP → Python helper environment) or runs:
 
 ```sh
 node scripts/setupAnalysis.js
 ```
 
-The plugin never installs packages during a tool call.
+It uses Blender's bundled Python as the base, creates the fixed venv and
+installs `requirements-analysis.lock.txt`. The plugin never installs packages
+during a tool call.

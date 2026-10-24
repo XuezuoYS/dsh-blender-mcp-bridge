@@ -27,8 +27,8 @@
         guard:
           enabled: true
         helper:
-          analysisPython: ''
-          autoDetectPython: true
+          basePython: ''
+          pipIndexUrl: ''
           timeoutMs: 120000
           maxOutputChars: 200000
           enableMaintenanceHelpers: false

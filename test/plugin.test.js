@@ -23,7 +23,7 @@ const CONFIG = /** @type {any} */ (Config({}))
  * Run `apply()` against a fake context.
  *
  * @param {boolean} [includeSkills] - expose a fake skills service
- * @returns {{ tools: RegisteredTool[], sections: unknown[], skills: any[] }} captured registrations
+ * @returns {{ tools: RegisteredTool[], sections: unknown[], skills: any[], routes: any[] }} captured registrations
  */
 function runApply(includeSkills = true) {
   /** @type {RegisteredTool[]} */
@@ -32,6 +32,8 @@ function runApply(includeSkills = true) {
   const sections = []
   /** @type {any[]} */
   const skills = []
+  /** @type {any[]} */
+  const routes = []
   const ctx = {
     logger: { warn() {} },
     /** @param {string} name - service name */
@@ -42,6 +44,17 @@ function runApply(includeSkills = true) {
           register(definition) {
             skills.push(definition)
             return () => {}
+          },
+        }
+      }
+      if (name === 'connection') {
+        return {
+          fetch: {
+            /** @param {any} route - fetch route */
+            register(route) {
+              routes.push(route)
+              return () => {}
+            },
           },
         }
       }
@@ -61,6 +74,7 @@ function runApply(includeSkills = true) {
      */
     inject(deps, callback) {
       if (deps.includes('skills') && includeSkills) callback(ctx)
+      if (deps.includes('connection')) callback(ctx)
       return { then() {} }
     },
     tools: {
@@ -85,7 +99,7 @@ function runApply(includeSkills = true) {
     },
   }
   apply(ctx, CONFIG)
-  return { tools, sections, skills }
+  return { tools, sections, skills, routes }
 }
 
 test('config defaults are applied and invalid values fail at load time', () => {
@@ -122,8 +136,8 @@ test('every graphics-settings field is a live volatile reference', () => {
     CONFIG.snapshot.compress,
     CONFIG.snapshot.timeoutMs,
     CONFIG.guard.enabled,
-    CONFIG.helper.analysisPython,
-    CONFIG.helper.autoDetectPython,
+    CONFIG.helper.basePython,
+    CONFIG.helper.pipIndexUrl,
     CONFIG.helper.timeoutMs,
     CONFIG.helper.maxOutputChars,
     CONFIG.helper.enableMaintenanceHelpers,
@@ -152,6 +166,15 @@ test('apply registers the full tool surface', () => {
   }
 })
 
+test('apply registers the helper environment route on the connection service', () => {
+  const { routes } = runApply()
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0].path, '/api/blender-bridge/helper-env')
+  assert.deepEqual(routes[0].methods, ['GET', 'POST'])
+  assert.equal(routes[0].requestBody, 'buffered')
+  assert.equal(typeof routes[0].fetch, 'function')
+})
+
 test('apply registers one system prompt section with the no-rollback rule', () => {
   const { sections } = runApply()
   assert.equal(sections.length, 1)
@@ -163,6 +186,8 @@ test('apply registers one system prompt section with the no-rollback rule', () =
   assert.match(section.text, /readOnly/)
   assert.match(section.text, /snapshot policy/)
   assert.match(section.text, /the user opens a snapshot/)
+  assert.match(section.text, /Python helper environment/)
+  assert.match(section.text, /never run pip install/)
 })
 
 test('the exec contract documents readOnly, the snapshot policy and the undo usage reply', () => {

@@ -8,7 +8,7 @@
 
 插件自己的详情页不再放配置表单；配置只在设置页维护，避免两处入口。
 
-设置页按从上到下的顺序分五组：
+设置页按从上到下的顺序分六组：
 
 | 分组 | 能调什么 |
 |---|---|
@@ -16,9 +16,19 @@
 | 快照与撤销 | 自动快照开关、保留份数、触发节奏、写入间隔、删除前补拍、压缩、快照超时 |
 | 安全与审计 | 写入守卫、审计开关、是否记录完整代码 |
 | 任务目录 | 跟随 `.blend` / 跟随工作区；自定义根目录 |
-| 高级与辅助分析 | 自动查找 Python、解释器路径、helper 超时与输出上限、维护类 helper、回复上限 |
+| Python 辅助环境 | 环境状态卡片、安装/修复/重建/重新检测、底座 Python、pip 镜像 |
+| 高级与辅助分析 | helper 超时与输出上限、维护类 helper、回复上限 |
 
 每项下面都有中文提示；页面顶部用三句话说明这个插件的安全边界（不保存 `.blend`、自动快照、超时只影响 DSH 等待）。
+
+## 1.1 Python 辅助环境卡片
+
+- 固定在 `DSH_HOME/dsh-blender-mcp-bridge/python/venv`，不搜索本机其它 Python；
+- 状态：未安装 / 不完整 / 需要重建 / 需要更新 / 就绪 / 安装中；
+- 卡片显示环境路径、底座（Blender/Python 版本）、四个包版本、缺失包、lock 版本和约 100 MB 下载预估；
+- 点安装后 Host 在后台建 venv、装 lock、校验，页面每 2 秒轮询；关掉页面不影响安装；
+- 环境不完整时顶部徽标会提示，`blender_mcp_helpers` 也会给出安装入口；
+- 没有设置页的客户端（TUI 等）用 `scripts/setupAnalysis.js` 安装。
 
 ## 2. 保存行为
 
@@ -38,5 +48,7 @@
 - 浏览器半侧在 `client.js`，`package.json` 的 `dsh.client` 声明为 `web`，`./client` 导出该文件。
 - 页面注册在 `settings.section` slot：`id: 'blenderBridge'`、`order: 55`、本地化 `label`；不再注册 `plugins.bundle.config`。
 - 表单数据来自 Client 的 `configForms.get('dsh-blender-mcp-bridge')`；namespace 就是 Loader 条目 id。
+- 环境卡片通过 `ctx.connection.fetch.register` 注册的 `GET/POST /api/blender-bridge/helper-env` 读取状态、触发安装；该路由与核心 `/api/file` 一样带 owner 鉴权，只接受固定动作和 `application/json`，不接受包名或路径。
+- 没有 `connection` 服务的宿主会跳过路由注册，卡片显示静态说明和 CLI 命令。
 - `index.js` 的 `Config` 字段都标了 `.volatile()`，所以 Settings 服务能生成可实时写入的表单；插件代码用 `liveValue()` 在每次调用时读当前值，不能提前把值拷进长生命周期对象。
 - 页面文案走 `blenderBridge` locale 字典；颜色只用 `--dsw-alias-*` 主题 token，图标是插件自己的桥拱图形。

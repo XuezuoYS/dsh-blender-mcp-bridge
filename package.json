@@ -64,7 +64,8 @@
     "probe": "node diagnostics/probePreflight.js",
     "probe:syntax": "node diagnostics/probePythonSyntax.js",
     "probe:guard": "node diagnostics/probeGuardOffline.js",
-    "probe:live": "node diagnostics/probeLive.js"
+    "probe:live": "node diagnostics/probeLive.js",
+    "setup:helpers": "node scripts/setupAnalysis.js"
   },
   "files": [
     "index.js",
@@ -75,6 +76,7 @@
     "helpers",
     "cordis.patch.yml",
     "requirements-analysis.txt",
+    "requirements-analysis.lock.txt",
     "scripts",
     "skills",
     "diagnostics",

@@ -14,6 +14,7 @@ import { ProtocolError } from '../lib/protocol.js'
 import { createRenderStats } from '../lib/renderStats.js'
 import { createSnapshotTracker } from '../lib/snapshotPolicy.js'
 import { makeTools } from '../lib/tools.js'
+import { createTestHelperEnv } from './support/testPython.js'
 
 /** @typedef {{ name: string, execute: (args: any, exec: any) => Promise<any>, output?: { render: (args: any, value: any) => any[] } }} ToolLike */
 
@@ -173,6 +174,7 @@ function makeBridge(setup) {
     throw new Error(`unexpected code sent to Blender: ${code.slice(0, 40)}`)
   }
 
+  const { helperEnv } = createTestHelperEnv()
   /** @type {import('../lib/tools.js').BridgeOptions} */
   const options = {
     host: '127.0.0.1',
@@ -181,8 +183,7 @@ function makeBridge(setup) {
     responseTimeoutMs: 1000,
     captureTimeoutMs: 1000,
     renderTimeoutMs: 1000,
-    maxResponseChars: 200000,
-    snapshot: {
+    maxResponseChars: 200000,    snapshot: {
       enabled: setup.snapshotEnabled !== false,
       generations: 3,
       on: setup.snapshotOn ?? 'adaptive',
@@ -213,7 +214,7 @@ function makeBridge(setup) {
     noteTimeout() {},
     clearTimeoutNote() {},
     helpersDir: path.resolve('helpers'),
-    pythonConfig: { analysisPython: '', autoDetectPython: true },
+    helperEnv,
     helperTimeoutMs: 120000,
     helperMaxOutputChars: 200000,
     enableMaintenanceHelpers: false,

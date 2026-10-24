@@ -1,0 +1,11 @@
+# Locked analysis dependencies for helpers/.
+#
+# Install with: node scripts/setupAnalysis.js
+# These exact versions come from the development venv used to exercise the
+# helper scripts, and each one publishes wheels for Python 3.13 / 3.14 on
+# Windows, macOS and Linux. Update requirements-analysis.txt and this file
+# together when a helper needs newer packages.
+numpy==2.5.4
+Pillow==12.3.0
+opencv-python-headless==4.14.0.94
+scipy==1.18.1
