@@ -54,6 +54,23 @@ const payloads = [
       guardEnabled: false,
     }),
   ],
+  [
+    'exec-readonly.py',
+    wrapWithGuard('result = {"ok": True}', {
+      taskRoot: path.join(workDir, 'task'),
+      undoMessage: 'dsh-blender: probe',
+      readOnly: true,
+    }),
+  ],
+  [
+    'exec-readonly-unguarded.py',
+    wrapWithGuard('result = {"ok": True}', {
+      taskRoot: path.join(workDir, 'task'),
+      undoMessage: 'dsh-blender: probe',
+      readOnly: true,
+      guardEnabled: false,
+    }),
+  ],
 ]
 
 let failed = false

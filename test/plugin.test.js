@@ -124,6 +124,17 @@ test('apply registers one system prompt section with the no-rollback rule', () =
   assert.match(section.text, /Never try to roll back/)
   assert.match(section.text, /Never save the \.blend/)
   assert.match(section.text, /snapshot/)
+  assert.match(section.text, /readOnly/)
+})
+
+test('the exec contract documents readOnly and the undo usage reply', () => {
+  const { tools } = runApply()
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+  assert.match(execTool.description, /readOnly/)
+  assert.match(execTool.description, /undoUsage/)
+  const parameters = /** @type {{ properties?: Record<string, unknown> }} */ (execTool.parameters)
+  assert.ok(parameters.properties && Object.hasOwn(parameters.properties, 'readOnly'))
 })
 
 test('registers the live-session skill when the skills service exists', () => {

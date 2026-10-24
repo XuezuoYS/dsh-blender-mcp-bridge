@@ -1,6 +1,7 @@
 /**
  * Guard payload tests: the generated Python must install, verify and uninstall
- * the runtime hooks, and must always push an undo step.
+ * the runtime hooks, and push one undo step in the default mode. The read-only
+ * mode carries the scene fingerprint and pushes only when it sees a change.
  */
 
 import assert from 'node:assert/strict'
@@ -60,4 +61,29 @@ test('thread scope is configurable', () => {
     threadScope: 'all',
   })
   assert.match(code, /'threadScope': "all"/)
+})
+
+test('the read-only payload fingerprints the scene and pushes undo only on change', () => {
+  const code = wrapWithGuard('result = {}', {
+    taskRoot: 'C:/proj/.dsh-blender-lamp',
+    undoMessage: 'dsh-blender: lamp',
+    readOnly: true,
+  })
+  assert.match(code, /def _dsh_fingerprint\(\):/)
+  assert.match(code, /_dsh_fp_before = _dsh_fingerprint\(\)/)
+  assert.match(code, /'read-only'/)
+  assert.match(code, /'read-only-changed'/)
+  assert.match(code, /'read-only-unverified'/)
+  assert.equal((code.match(/bpy\.ops\.ed\.undo_push/g) ?? []).length, 1)
+  // The fingerprint imports run before the install call replaces open()/bpy.ops.
+  assert.ok(code.indexOf('def _dsh_fingerprint()') < code.indexOf('_dsh_handle = _dsh_install('))
+})
+
+test('the default payload carries no fingerprint code', () => {
+  const code = wrapWithGuard('result = {}', {
+    taskRoot: 'C:/proj/.dsh-blender-lamp',
+    undoMessage: 'dsh-blender: lamp',
+  })
+  assert.doesNotMatch(code, /_dsh_fingerprint/)
+  assert.match(code, /bpy\.ops\.ed\.undo_push/)
 })

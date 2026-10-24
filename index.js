@@ -62,9 +62,9 @@ export const SYSTEM_PROMPT = `You can work in the user's currently open Blender 
 
 Ground rules:
 1. The session is live and may contain unsaved work. Never save the .blend, never open another file, never quit Blender, never change preferences. The plugin blocks the obvious calls; the guard is a mistake guard, not a sandbox.
-2. Before the first write of a turn, blender_mcp_exec writes a snapshot (when enabled), then pushes one undo step. Use batch to group several snippets into one snapshot/undo step; code that pushes its own undo steps can add more. Tell the user they can press Ctrl+Z to step back.
+2. blender_mcp_exec has two modes. Write code uses the default mode: before the first write of a turn it writes a snapshot (when enabled), then pushes one undo step; use batch to group several snippets into one snapshot/undo step. Inspection code uses readOnly: true: no snapshot, no object diff, no undo step — the plugin still pushes one undo step if the call actually changed the scene. Code that pushes its own undo steps can add more. Tell the user they can press Ctrl+Z to step back.
 3. Write files only under the task directory (.dsh-blender-<task> next to the .blend). OS temp files are allowed for scratch work. Writes outside it are refused with a suggested path; do not retry the same out-of-bounds path. Operator-level file writes are checked; C-level data methods such as image.save_render are not intercepted.
-4. Inspect before editing: call blender_mcp_status / blender_mcp_inspect first.
+4. Inspect before editing: call blender_mcp_status / blender_mcp_inspect first, and use blender_mcp_exec with readOnly: true for extra read-only queries.
 5. Do not change render settings on your own. When the user asks for a preview render, use their explicit width/height/samples.
 6. If something looks wrong — a write was blocked unexpectedly, the .blend changed on disk, a tool timed out, the guard self-check failed, the scene looks broken — stop, tell the user exactly what happened with the snapshot path, and end the turn. Never try to roll back or repair the damage yourself; rollback is the user's decision (Ctrl+Z or opening a snapshot).
 7. When unsure about a Blender API, read the English manual linked from status.docs.manualEn with web_fetch.
@@ -84,6 +84,8 @@ export function apply(ctx, config) {
   const snapshotSeq = new Map()
   /** @type {Set<string>} session id + task dir -> snapshot already taken this turn */
   const snapshotTaken = new Set()
+  /** @type {Map<string, number>} session id -> undo steps pushed by the plugin (estimate) */
+  const undoPushes = new Map()
   /** @type {Set<string>} session ids with a timing-out call that lost its reply */
   const timeoutNotes = new Set()
   /** @type {Map<string, string>} session id -> last known .blend path */
@@ -126,6 +128,7 @@ export function apply(ctx, config) {
       turns.delete(session.id)
       timeoutNotes.delete(session.id)
       knownFilePaths.delete(session.id)
+      undoPushes.delete(session.id)
       for (const key of snapshotTaken) if (key.startsWith(prefix)) snapshotTaken.delete(key)
       for (const key of snapshotSeq.keys()) if (key.startsWith(prefix)) snapshotSeq.delete(key)
     },
@@ -284,6 +287,10 @@ export function apply(ctx, config) {
     clearTimeoutNote: (sessionId) => {
       timeoutNotes.delete(sessionId)
     },
+    undoPushCount: (sessionId) => undoPushes.get(sessionId) ?? 0,
+    noteUndoPush: (sessionId) => {
+      undoPushes.set(sessionId, (undoPushes.get(sessionId) ?? 0) + 1)
+    },
     snapshotState: {
       shouldSnapshot: (sessionId, taskDir) => {
         if (config.snapshot.on === 'write') return true
@@ -349,5 +356,6 @@ const LIVE_SESSION_SKILL_FALLBACK = `# Blender Live Session
 
 Work in the user's open Blender session through the blender_mcp_* tools.
 Inspect before editing, write only under the task directory, never save the
-.blend, one undo step per exec, and never roll back by yourself: report the
-problem and end the turn.`
+.blend, and send only inspection code with readOnly: true (it skips the
+snapshot and the undo step). Never roll back by yourself: report the problem
+and end the turn.`

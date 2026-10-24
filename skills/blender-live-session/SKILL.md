@@ -20,9 +20,12 @@ guard, not a sandbox.
 ## Ground rules
 
 1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`.
-2. **One undo step per `blender_mcp_exec`**: the plugin pushes it; use the
-   `batch` array to run several snippets under one snapshot/undo step; code that
-   pushes its own undo steps can add more. Tell the user `Ctrl+Z` steps back.
+2. **Choose the `blender_mcp_exec` mode.** Write code uses the default mode:
+   the plugin snapshots before the first write of the turn (when enabled) and
+   pushes one undo step; group snippets with `batch`. Inspection code uses
+   `readOnly: true`: no snapshot, no object diff, no undo step — unless the call
+   actually changed the scene, then one step is pushed anyway. Code that pushes
+   its own undo steps can add more. Tell the user `Ctrl+Z` steps back.
 3. **Write only under the task directory** (`.dsh-blender-<task>` next to the
    `.blend`); OS temp files are allowed for scratch work. Blocked writes return
    `suggestedPath`; do not retry the same path.
@@ -62,8 +65,9 @@ evidence (`result = {...}`).
 ### 4. Validate
 
 After each phase verify names, transforms, dimensions, parents, modifiers,
-topology counts, materials and accidental duplicates. Inspect a screenshot
-after the blockout and a render before calling the model finished.
+topology counts, materials and accidental duplicates (send these checks with
+`readOnly: true`). Inspect a screenshot after the blockout and a render before
+calling the model finished.
 
 ### 5. Snapshots and handoff
 
@@ -77,7 +81,7 @@ and where the artifacts are.
 | Upstream tool | Use here |
 |---|---|
 | `get_scene_info` / `get_object_info` | `blender_mcp_inspect` |
-| `execute_blender_code` | `blender_mcp_exec` |
+| `execute_blender_code` | `blender_mcp_exec` (`readOnly: true` for inspection) |
 | `get_viewport_screenshot` | `blender_mcp_capture` |
 | save versioned `.blend` | snapshots + `Ctrl+Z`; never save |
 | analysis/validation helpers | `blender_mcp_helpers` + `blender_mcp_helper` |

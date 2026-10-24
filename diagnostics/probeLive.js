@@ -87,7 +87,26 @@ result = {'count': len(bpy.data.objects)}
   record('undo pushes exactly one step', false, String(error))
 }
 
-// 2) guard blocks a real save attempt
+// 2) read-only exec: nothing changed, so no undo step is pushed
+try {
+  const readOnly = wrapWithGuard('result = {"objects": len(bpy.data.objects)}', {
+    taskRoot: guardRoot,
+    undoMessage: 'dsh-probe-readonly',
+    readOnly: true,
+  })
+  const reply = await send(readOnly)
+  const inner = reply.result ?? {}
+  const undo = inner.undo ?? {}
+  record(
+    'read-only exec pushes no undo step',
+    inner.status === 'ok' && undo.pushed === false && undo.reason === 'read-only',
+    `pushed=${String(undo.pushed)} reason=${String(undo.reason)}`,
+  )
+} catch (error) {
+  record('read-only exec pushes no undo step', false, String(error))
+}
+
+// 3) guard blocks a real save attempt
 try {
   const guarded = wrapWithGuard('import bpy\nbpy.ops.wm.save_mainfile()', {
     taskRoot: guardRoot,
@@ -103,7 +122,7 @@ try {
   record('save operator is blocked', false, String(error))
 }
 
-// 3) snapshot leaves filepath and dirty flag alone
+// 4) snapshot leaves filepath and dirty flag alone
 try {
   const snapPath = path.join(workDir, 'probe-snapshot.blend')
   const reply = await send(snapshotCode(snapPath, true), 60000)
@@ -117,7 +136,7 @@ try {
   record('snapshot copy written', false, String(error))
 }
 
-// 4) whole-window screenshot
+// 5) whole-window screenshot
 try {
   const shotPath = path.join(workDir, 'probe-shot.png')
   const reply = await send(captureCode(shotPath), 30000)
@@ -128,7 +147,7 @@ try {
   record('window screenshot', false, String(error))
 }
 
-// 5) preview render and full restore
+// 6) preview render and full restore
 try {
   const setup = await send(`import bpy
 scene = bpy.context.scene
@@ -184,7 +203,7 @@ result = {'count': len(bpy.data.objects)}
   record('preview render', false, String(error))
 }
 
-// 6) user file still untouched at the end
+// 7) user file still untouched at the end
 if (userFile !== '' && beforeStat !== null && existsSync(userFile)) {
   const afterStat = statSync(userFile)
   record('user .blend never saved', afterStat.mtimeMs === beforeStat.mtimeMs && afterStat.size === beforeStat.size)

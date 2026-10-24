@@ -88,7 +88,8 @@ function pngStub(width, height) {
  * @param {string} [setup.knownFilePath] - last known .blend path for Python helpers
  * @param {boolean} [setup.timeoutOnExec] - make the exec request time out
  * @param {boolean} [setup.probeUnreachable] - make the liveness probe fail to connect
- * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[] }} bridge pieces
+ * @param {number} [setup.initialPushes] - undo steps already pushed this session
+ * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[], pushes: () => number }} bridge pieces
  */
 function makeBridge(setup) {
   /** @type {string[]} */
@@ -97,6 +98,8 @@ function makeBridge(setup) {
   const sentOptions = []
   /** @type {string[]} */
   const snapshotFiles = []
+  let pushes = setup.initialPushes ?? 0
+  let snapshotsTaken = 0
   const send = async (/** @type {string} */ code, /** @type {Record<string, unknown>} */ options = {}) => {
     sent.push(code)
     sentOptions.push(options)
@@ -180,9 +183,15 @@ function makeBridge(setup) {
     knownFilePath: () => setup.knownFilePath ?? '',
     noteFilePath() {},
     snapshotState: {
-      shouldSnapshot: () => setup.snapshotEnabled !== false,
-      markSnapshot() {},
+      shouldSnapshot: () => setup.snapshotEnabled !== false && snapshotsTaken === 0,
+      markSnapshot() {
+        snapshotsTaken += 1
+      },
       nextSeq: () => 1,
+    },
+    undoPushCount: () => pushes,
+    noteUndoPush() {
+      pushes += 1
     },
     withWriteLock: (task) => task(),
     imageSupport: setup.imageSupport ?? (async () => false),
@@ -196,7 +205,7 @@ function makeBridge(setup) {
     helperMaxOutputChars: 200000,
     enableMaintenanceHelpers: false,
   }
-  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, sentOptions, snapshotFiles }
+  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, sentOptions, snapshotFiles, pushes: () => pushes }
 }
 
 async function makeProject() {
@@ -484,6 +493,165 @@ test('exec passes a per-call timeout to the transport', async () => {
 
   await execTool.execute({ code: 'result = {}', task: 'lamp', timeoutMs: 1234 }, { agent: { session: { id: 's1' } } })
   assert.ok(sentOptions.some((options) => options.responseTimeoutMs === 1234))
+})
+
+test('ten read-only exec calls skip the snapshot, the object diff and the undo step', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    execResult: () => ({
+      status: 'ok',
+      result: { objects: 3174 },
+      undo: { pushed: false, message: 'dsh-blender: lamp', reason: 'read-only' },
+      guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+      warnings: [],
+    }),
+  })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  for (let index = 0; index < 10; index += 1) {
+    /** @type {Record<string, any>} */
+    const value = await execTool.execute(
+      { code: 'result = {"objects": len(bpy.data.objects)}', task: 'lamp', readOnly: true },
+      { agent: { session: { id: 's1' } } },
+    )
+    assert.equal(value.status, 'ok')
+    assert.equal(value.snapshot, undefined)
+    assert.deepEqual(value.changes, { skipped: true, reason: 'read-only' })
+    assert.equal(value.undo.pushed, false)
+    assert.equal(value.undoUsage.pluginPushes, 0)
+    assert.equal(value.undoUsage.stepLimit, 32)
+    assert.ok(!(/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('undo step was not pushed')))
+  }
+  assert.equal(bridge.pushes(), 0)
+  assert.equal(bridge.snapshotFiles.length, 0)
+  assert.equal(bridge.sent.some((code) => code.includes('bpy.data.objects][:500]')), false)
+  assert.ok(bridge.sent.some((code) => code.includes('<dsh-user-code>')))
+  assert.ok(bridge.sent.some((code) => code.includes('_dsh_fingerprint')))
+})
+
+test('a read-only exec does not use the turn snapshot slot', async () => {
+  const { blendPath, root } = await makeProject()
+  let calls = 0
+  const bridge = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    execResult: () => {
+      calls += 1
+      return calls === 1
+        ? {
+            status: 'ok',
+            result: {},
+            undo: { pushed: false, message: 'dsh-blender: lamp', reason: 'read-only' },
+            guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+            warnings: [],
+          }
+        : {
+            status: 'ok',
+            result: {},
+            undo: { pushed: true, message: 'dsh-blender: lamp' },
+            guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+            warnings: [],
+          }
+    },
+  })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const readOnlyValue = await execTool.execute(
+    { code: 'result = {}', task: 'lamp', readOnly: true },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.equal(readOnlyValue.snapshot, undefined)
+  assert.equal(bridge.snapshotFiles.length, 0)
+
+  const writeValue = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(writeValue.snapshot?.name, '3-000001.blend')
+  assert.equal(bridge.snapshotFiles.length, 1)
+})
+
+test('a read-only exec that changed the scene still pushes undo and warns', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    execResult: () => ({
+      status: 'ok',
+      result: {},
+      undo: { pushed: true, message: 'dsh-blender: lamp', reason: 'read-only-changed' },
+      guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+      warnings: [],
+    }),
+  })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute(
+    { code: 'obj.location = (1, 0, 0)', task: 'lamp', readOnly: true },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.equal(value.status, 'ok')
+  assert.equal(value.undo.pushed, true)
+  assert.equal(bridge.pushes(), 1)
+  assert.equal(value.undoUsage.pluginPushes, 1)
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('readOnly was set')))
+})
+
+test('a read-only exec with an unavailable change check pushes undo and warns', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    execResult: () => ({
+      status: 'ok',
+      result: {},
+      undo: { pushed: true, message: 'dsh-blender: lamp', reason: 'read-only-unverified', checkError: 'AttributeError: objects' },
+      guard: { enabled: true, verified: true, opsIntact: true, blocked: [], noted: [] },
+      warnings: [],
+    }),
+  })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp', readOnly: true }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'ok')
+  assert.equal(value.undo.pushed, true)
+  const warnings = /** @type {string[]} */ (value.warnings)
+  assert.ok(warnings.some((warning) => warning.includes('scene change check failed')))
+  assert.ok(warnings.some((warning) => warning.includes('AttributeError: objects')))
+})
+
+test('undo usage counts plugin pushes and warns at the preference limit', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root, initialPushes: 31 })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+  assert.ok(execTool.output)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.status, 'ok')
+  assert.equal(bridge.pushes(), 32)
+  assert.equal(value.undoUsage.pluginPushes, 32)
+  assert.equal(value.undoUsage.stepLimit, 32)
+  assert.ok((/** @type {string[]} */ (value.warnings)).some((warning) => warning.includes('preference limit')))
+  const text = String(execTool.output.render({}, value)[0].text)
+  assert.ok(text.includes('Undo usage: 32 plugin pushes'))
+})
+
+test('readOnly must be a boolean', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await assert.rejects(
+    () =>
+      execTool.execute({ code: 'result = {}', task: 'lamp', readOnly: 'yes' }, { agent: { session: { id: 's1' } } }),
+    /readOnly/,
+  )
+  assert.equal(bridge.sent.length, 0)
 })
 
 test('a timed-out exec reports Blender unreachable when the probe cannot connect', async () => {
