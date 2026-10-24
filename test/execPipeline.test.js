@@ -12,6 +12,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { ProtocolError } from '../lib/protocol.js'
 import { createRenderStats } from '../lib/renderStats.js'
+import { SendGateError } from '../lib/sendGate.js'
 import { createSnapshotTracker } from '../lib/snapshotPolicy.js'
 import { makeTools } from '../lib/tools.js'
 import { createTestHelperEnv } from './support/testPython.js'
@@ -97,7 +98,8 @@ function pngStub(width, height) {
  * @param {boolean} [setup.timeoutOnExec] - make the exec request time out
  * @param {boolean} [setup.probeUnreachable] - make the liveness probe fail to connect
  * @param {number} [setup.initialPushes] - undo steps already pushed this session
- * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[], inspectParams: Record<string, unknown>[], pushes: () => number }} bridge pieces
+ * @param {boolean} [setup.busyGate] - make the read-slot gate reject with a busy error
+ * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[], inspectParams: Record<string, unknown>[], slotCalls: () => number, pushes: () => number }} bridge pieces
  */
 function makeBridge(setup) {
   /** @type {string[]} */
@@ -109,6 +111,7 @@ function makeBridge(setup) {
   /** @type {Record<string, unknown>[]} */
   const inspectParams = []
   let pushes = setup.initialPushes ?? 0
+  let slotCalls = 0
   const snapshotState = createSnapshotTracker({
     enabled: setup.snapshotEnabled !== false,
     on: setup.snapshotOn ?? 'adaptive',
@@ -237,6 +240,11 @@ function makeBridge(setup) {
       pushes += 1
     },
     withWriteLock: (task) => task(),
+    withSendSlot: (task) => {
+      slotCalls += 1
+      if (setup.busyGate === true) return Promise.reject(new SendGateError('busy', 'no free slot'))
+      return task()
+    },
     imageSupport: setup.imageSupport ?? (async () => false),
     attachImage: setup.attachImage ?? (async () => null),
     renderStats: createRenderStats(),
@@ -249,7 +257,15 @@ function makeBridge(setup) {
     helperMaxOutputChars: 200000,
     enableMaintenanceHelpers: false,
   }
-  return { tools: /** @type {ToolLike[]} */ (makeTools(options)), sent, sentOptions, snapshotFiles, inspectParams, pushes: () => pushes }
+  return {
+    tools: /** @type {ToolLike[]} */ (makeTools(options)),
+    sent,
+    sentOptions,
+    snapshotFiles,
+    inspectParams,
+    slotCalls: () => slotCalls,
+    pushes: () => pushes,
+  }
 }
 
 async function makeProject() {
@@ -1124,4 +1140,43 @@ test('inspect renders its reply as compact lines', async () => {
   assert.match(text, /Types: MESH 1/)
   assert.match(text, /Sample objects \(1 of 1, offset 0\):/)
   assert.match(text, /- Cube \[MESH\]/)
+})
+
+test('read tools send through the concurrency gate, writes do not', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, slotCalls } = makeBridge({ blendPath, workspaceDir: root })
+  const statusTool = tools.find((tool) => tool.name === 'blender_mcp_status')
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(statusTool)
+  assert.ok(inspectTool)
+  assert.ok(execTool)
+  const exec = { agent: { session: { id: 's1' } } }
+
+  await statusTool.execute({}, exec)
+  assert.equal(slotCalls(), 1, 'status takes a read slot')
+  await inspectTool.execute({}, exec)
+  assert.equal(slotCalls(), 2, 'inspect takes a read slot')
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, exec)
+  assert.equal(slotCalls(), 2, 'writes are serialized by the write lock instead')
+})
+
+test('a busy gate is reported as a readable status error', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root, busyGate: true })
+  const statusTool = tools.find((tool) => tool.name === 'blender_mcp_status')
+  const inspectTool = tools.find((tool) => tool.name === 'blender_mcp_inspect')
+  assert.ok(statusTool)
+  assert.ok(inspectTool)
+  const exec = { agent: { session: { id: 's1' } } }
+
+  const status = await statusTool.execute({}, exec)
+  assert.equal(status.connected, false)
+  assert.equal(status.error.kind, 'busy')
+  assert.match(status.error.message, /no free slot/)
+  assert.ok(Array.isArray(status.error.actions) && status.error.actions.length > 0)
+
+  const inspect = await inspectTool.execute({}, exec)
+  assert.equal(inspect.status, 'error')
+  assert.equal(inspect.error.kind, 'busy')
 })

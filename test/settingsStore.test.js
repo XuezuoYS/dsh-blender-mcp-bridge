@@ -88,13 +88,21 @@ test('an existing file wins over the profile migration value', () => {
 test('update writes the owning file, keeps the revision and reports conflicts', () => {
   const { root, store } = makeStore()
   const before = store.getRevision()
-  const result = store.update([{ op: 'set', path: ['port'], value: 1234 }], before)
+  const result = store.update(
+    [
+      { op: 'set', path: ['port'], value: 1234 },
+      { op: 'set', path: ['maxConcurrentSends'], value: 4 },
+    ],
+    before,
+  )
   assert.equal(result.ok, true)
   assert.notEqual(result.revision, before)
   assert.equal(store.get().port, 1234)
+  assert.equal(store.get().maxConcurrentSends, 4)
   const file = path.join(settingsDir(root), 'connection.json')
   const parsed = JSON.parse(readFileSync(file, 'utf8'))
   assert.equal(parsed.values.port, 1234)
+  assert.equal(parsed.values.maxConcurrentSends, 4)
 
   const conflict = store.update([{ op: 'set', path: ['port'], value: 4321 }], before)
   assert.equal(conflict.ok, false)

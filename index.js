@@ -20,6 +20,7 @@ import { createHelperEnvHandlers, HELPER_ENV_PATH } from './lib/helperEnvRoutes.
 import { handshake } from './lib/handshake.js'
 import { sendExecute } from './lib/protocol.js'
 import { createRenderStats } from './lib/renderStats.js'
+import { createSendGate } from './lib/sendGate.js'
 import { createSettingsHandlers, SETTINGS_PATH } from './lib/settingsRoutes.js'
 import { createSettingsStore } from './lib/settingsStore.js'
 import { createSnapshotTracker } from './lib/snapshotPolicy.js'
@@ -30,6 +31,13 @@ export const name = 'dsh-blender-mcp-bridge'
 
 /** Services this plugin needs before it can activate. */
 export const inject = ['tools', 'systemPrompt']
+
+/**
+ * Extra attempts after a refused connect. `ECONNREFUSED` means the socket never
+ * opened, so retrying cannot run anything twice. The delays total ~1.4 s, which
+ * covers the add-on's listen queue staying full through one idle poll tick.
+ */
+const CONNECT_RETRIES = 3
 
 /** The plugin's schema, re-exported for the DSH loader and tests. */
 export { Config }
@@ -95,6 +103,12 @@ export function apply(ctx, config) {
   const undoPushes = new Map()
   /** Per-session render-speed samples used for a rough "will this fit?" estimate. */
   const renderStats = createRenderStats()
+  /**
+   * One concurrency gate for the whole plugin: read tools may run in parallel
+   * from DSH's point of view, but the add-on's listen queue tolerates only a
+   * few connections at once. The limit is read from settings on every call.
+   */
+  const sendGate = createSendGate({ limitOf: () => currentSettings().maxConcurrentSends })
   /** @type {Set<string>} session ids with a timing-out call that lost its reply */
   const timeoutNotes = new Set()
   /** @type {Map<string, string>} session id -> last known .blend path */
@@ -331,9 +345,11 @@ export function apply(ctx, config) {
         connectTimeoutMs: settings.connectTimeoutMs,
         responseTimeoutMs: overrides.responseTimeoutMs ?? settings.responseTimeoutMs,
         maxResponseChars: settings.maxResponseChars,
+        connectRetries: CONNECT_RETRIES,
         signal: overrides.signal,
       })
     },
+    withSendSlot: (task, signal) => sendGate.run(task, signal),
     warn: (message) => {
       ctx.logger.warn(message)
     },

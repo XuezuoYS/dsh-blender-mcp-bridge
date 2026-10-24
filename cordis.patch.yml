@@ -12,6 +12,7 @@
       config:
         host: 127.0.0.1
         port: 9876
+        maxConcurrentSends: 5
         connectTimeoutMs: 5000
         responseTimeoutMs: 30000
         captureTimeoutMs: 30000

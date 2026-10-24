@@ -52,6 +52,9 @@ window.__ModuleLoader__.load({
       hostHint: 'Blender MCP 插件的本地监听地址，通常是 127.0.0.1。',
       fieldPort: '端口',
       portHint: '默认 9876，需与 Blender 插件设置里的端口一致。',
+      fieldMaxConcurrentSends: '并发上限',
+      maxConcurrentSendsHint:
+        '同时发往 Blender 的连接数上限。Blender 5.2 实测上限 5（官方 add-on 的 listen backlog），超过会被拒绝；默认 5，同时开着其他 Blender 客户端时建议调到 4。',
       fieldConnect: '连接超时',
       connectHint: '建立本地连接的最长等待，单位秒。',
       fieldResponse: '执行超时',
@@ -212,6 +215,9 @@ window.__ModuleLoader__.load({
       hostHint: 'Local address the Blender MCP add-on listens on; usually 127.0.0.1.',
       fieldPort: 'Port',
       portHint: 'Defaults to 9876 and must match the Blender add-on settings.',
+      fieldMaxConcurrentSends: 'Concurrency limit',
+      maxConcurrentSendsHint:
+        'Concurrent connections to Blender. Blender 5.2 measured limit is 5 (the add-on listen backlog); more are refused. Default 5; use 4 when other Blender clients are connected.',
       fieldConnect: 'Connect timeout',
       connectHint: 'Longest wait when opening the local connection, in seconds.',
       fieldResponse: 'Exec timeout',
@@ -350,6 +356,7 @@ window.__ModuleLoader__.load({
     const FIELDS = [
       { key: 'host', path: ['host'], kind: 'text', label: 'fieldHost', hint: 'hostHint', group: 'connection', required: true, width: 'host' },
       { key: 'port', path: ['port'], kind: 'int', label: 'fieldPort', hint: 'portHint', min: 1, max: 65535, group: 'connection', display: 'input', width: 'port' },
+      { key: 'maxConcurrentSends', path: ['maxConcurrentSends'], kind: 'int', label: 'fieldMaxConcurrentSends', hint: 'maxConcurrentSendsHint', min: 1, max: 20, group: 'connection', display: 'stepper' },
       { key: 'connectTimeoutMs', path: ['connectTimeoutMs'], kind: 'seconds', label: 'fieldConnect', hint: 'connectHint', min: 0.1, group: 'connection' },
       { key: 'responseTimeoutMs', path: ['responseTimeoutMs'], kind: 'seconds', label: 'fieldResponse', hint: 'responseHint', min: 1, group: 'connection' },
       { key: 'captureTimeoutMs', path: ['captureTimeoutMs'], kind: 'seconds', label: 'fieldCapture', hint: 'captureHint', min: 1, group: 'connection' },

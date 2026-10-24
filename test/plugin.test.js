@@ -110,12 +110,15 @@ function runApply(includeSkills = true) {
 
 test('config defaults are applied and invalid values fail at load time', () => {
   assert.equal(CONFIG.port.get(), 9876)
+  assert.equal(CONFIG.maxConcurrentSends.get(), 5)
   assert.equal(CONFIG.snapshot.generations.get(), 3)
   assert.equal(CONFIG.snapshot.timeoutMs.get(), 120000)
   assert.equal(CONFIG.snapshot.on.get(), 'adaptive')
   assert.equal(CONFIG.snapshot.everyWrites.get(), 10)
   assert.equal(CONFIG.snapshot.onDestructive.get(), true)
   assert.throws(() => Config({ port: 70000 }))
+  assert.throws(() => Config({ maxConcurrentSends: 0 }))
+  assert.throws(() => Config({ maxConcurrentSends: 21 }))
   assert.throws(() => Config({ snapshot: { generations: 99 } }))
   assert.throws(() => Config({ snapshot: { timeoutMs: 0 } }))
   assert.throws(() => Config({ snapshot: { on: 'sometimes' } }))
@@ -127,6 +130,7 @@ test('every graphics-settings field is a live volatile reference', () => {
   const fields = [
     CONFIG.host,
     CONFIG.port,
+    CONFIG.maxConcurrentSends,
     CONFIG.connectTimeoutMs,
     CONFIG.responseTimeoutMs,
     CONFIG.captureTimeoutMs,

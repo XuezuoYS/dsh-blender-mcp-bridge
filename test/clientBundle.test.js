@@ -159,7 +159,7 @@ test('every settings field path is a live Config field', () => {
   const paths = [...source.matchAll(/path: \[([^\]]+)\]/g)].map((match) =>
     match[1].split(',').map((part) => part.trim().replace(/^['"]|['"]$/g, '')),
   )
-  assert.equal(paths.length, 24)
+  assert.equal(paths.length, 25)
   for (const path of paths) {
     /** @type {any} */
     let node = config
