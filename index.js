@@ -13,13 +13,15 @@ import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import z from '@deepseek-ai/schemastery'
+import { Config, defaultSettings, pickKnown, unwrapConfig } from './lib/config.js'
 import { listHelpers } from './lib/helperCatalog.js'
 import { createHelperEnv, defaultDshHome } from './lib/helperEnv.js'
 import { createHelperEnvHandlers, HELPER_ENV_PATH } from './lib/helperEnvRoutes.js'
 import { handshake } from './lib/handshake.js'
 import { sendExecute } from './lib/protocol.js'
 import { createRenderStats } from './lib/renderStats.js'
+import { createSettingsHandlers, SETTINGS_PATH } from './lib/settingsRoutes.js'
+import { createSettingsStore } from './lib/settingsStore.js'
 import { createSnapshotTracker } from './lib/snapshotPolicy.js'
 import { makeTools } from './lib/tools.js'
 
@@ -29,68 +31,8 @@ export const name = 'dsh-blender-mcp-bridge'
 /** Services this plugin needs before it can activate. */
 export const inject = ['tools', 'systemPrompt']
 
-/**
- * Validated plugin configuration.
- *
- * Every field is volatile: DSH's settings service turns these into live
- * references, so the graphics settings page can change one without restarting
- * the plugin (or interrupting a running turn). Code in this file reads them
- * through `liveValue()` on each use; never copy them into a long-lived object.
- */
-export const Config = z.object({
-  host: z.string().default('127.0.0.1').volatile(),
-  port: z.natural().min(1).max(65535).default(9876).volatile(),
-  connectTimeoutMs: z.natural().min(100).default(5000).volatile(),
-  responseTimeoutMs: z.natural().min(1000).default(30000).volatile(),
-  captureTimeoutMs: z.natural().min(1000).default(30000).volatile(),
-  renderTimeoutMs: z.natural().min(1000).default(120000).volatile(),
-  maxResponseChars: z
-    .natural()
-    .min(1000)
-    .default(200000)
-    .description('Byte cap for one reply; the name is historical.')
-    .volatile(),
-  taskRootMode: z.union(['blendFile', 'workspace']).default('blendFile').volatile(),
-  taskRoot: z.string().default('').volatile(),
-  snapshot: z.object({
-    enabled: z.boolean().default(true).volatile(),
-    generations: z.natural().min(1).max(20).default(3).volatile(),
-    on: z.union(['turn', 'write', 'adaptive']).default('adaptive').volatile(),
-    everyWrites: z.natural().min(1).max(100).default(10).volatile(),
-    onDestructive: z.boolean().default(true).volatile(),
-    compress: z.boolean().default(true).volatile(),
-    timeoutMs: z.natural().min(1000).default(120000).volatile(),
-  }),
-  guard: z.object({
-    enabled: z.boolean().default(true).volatile(),
-  }),
-  helper: z.object({
-    basePython: z.string().default('').volatile(),
-    pipIndexUrl: z.string().default('').volatile(),
-    timeoutMs: z.natural().min(1000).default(120000).volatile(),
-    maxOutputChars: z.natural().min(1000).default(200000).volatile(),
-    enableMaintenanceHelpers: z.boolean().default(false).volatile(),
-  }),
-  audit: z.object({
-    enabled: z.boolean().default(true).volatile(),
-    storeCode: z.boolean().default(false).volatile(),
-  }),
-})
-
-/**
- * Read a configuration value that may be a live volatile reference.
- *
- * Schemastery wraps `.volatile()` fields and stores them in a reference read
- * with `.get()`. Plain values still pass through, which keeps offline tests and
- * direct `apply()` calls working.
- *
- * @param {any} value - plain value or volatile reference
- * @returns {any} current plain value
- */
-function liveValue(value) {
-  return value !== null && typeof value === 'object' && typeof value.get === 'function' ? value.get() : value
-}
-
+/** The plugin's schema, re-exported for the DSH loader and tests. */
+export { Config }
 
 /** Model-facing safety rules; English on purpose (the model reads it). */
 export const SYSTEM_PROMPT = `You can work in the user's currently open Blender session through the blender_mcp_* tools. These tools talk to the official MCP add-on inside the running Blender process.
@@ -110,28 +52,41 @@ Ground rules:
  * Register tools and the system prompt section.
  *
  * @param {any} ctx - cordis context
- * @param {any} config - validated plugin config
+ * @param {any} config - DSH-loaded config; only used for the one-time settings migration
  * @returns {void}
  */
 export function apply(ctx, config) {
   /** @type {Map<string, number>} session id -> current turn */
   const turns = new Map()
   /**
+   * The plugin-owned settings store. It lives under the DSH home and is the
+   * only source of truth; the DSH profile values are used once for migration.
+   */
+  const settingsDefaults = defaultSettings()
+  const settings = createSettingsStore({
+    dshHome: defaultDshHome(),
+    defaults: settingsDefaults,
+    legacy: pickKnown(unwrapConfig(config ?? {}), settingsDefaults),
+    warn: (message) => ctx.logger.warn(message),
+  })
+  /** @returns {any} current settings */
+  const currentSettings = () => settings.get()
+  /**
    * Live snapshot policy: the tracker reads these getters before every write,
    * so a saved cadence change applies to the next call without a remount.
    */
   const snapshotPolicy = {
     get enabled() {
-      return liveValue(config.snapshot.enabled)
+      return currentSettings().snapshot.enabled
     },
     get on() {
-      return liveValue(config.snapshot.on)
+      return currentSettings().snapshot.on
     },
     get everyWrites() {
-      return liveValue(config.snapshot.everyWrites)
+      return currentSettings().snapshot.everyWrites
     },
     get onDestructive() {
-      return liveValue(config.snapshot.onDestructive)
+      return currentSettings().snapshot.onDestructive
     },
   }
   /** Automatic-snapshot cadence state: session id + task dir -> counters. */
@@ -162,8 +117,8 @@ export function apply(ctx, config) {
     pluginRoot: packageRoot,
     packageVersion,
     getConfig: () => ({
-      basePython: liveValue(config.helper.basePython),
-      pipIndexUrl: liveValue(config.helper.pipIndexUrl),
+      basePython: currentSettings().helper.basePython,
+      pipIndexUrl: currentSettings().helper.pipIndexUrl,
     }),
     warn: (message) => ctx.logger.warn(message),
   })
@@ -302,79 +257,83 @@ export function apply(ctx, config) {
 
   /**
    * Tool options. Configuration fields are getters: the settings page writes
-   * volatile references in place, and every tool call reads the current value.
+   * the plugin's JSON files, and every call reads the current value.
    *
    * @type {import('./lib/tools.js').BridgeOptions}
    */
   const options = {
     get host() {
-      return liveValue(config.host)
+      return currentSettings().host
     },
     get port() {
-      return liveValue(config.port)
+      return currentSettings().port
     },
     get connectTimeoutMs() {
-      return liveValue(config.connectTimeoutMs)
+      return currentSettings().connectTimeoutMs
     },
     get responseTimeoutMs() {
-      return liveValue(config.responseTimeoutMs)
+      return currentSettings().responseTimeoutMs
     },
     get captureTimeoutMs() {
-      return liveValue(config.captureTimeoutMs)
+      return currentSettings().captureTimeoutMs
     },
     get renderTimeoutMs() {
-      return liveValue(config.renderTimeoutMs)
+      return currentSettings().renderTimeoutMs
     },
     get maxResponseChars() {
-      return liveValue(config.maxResponseChars)
+      return currentSettings().maxResponseChars
     },
     helpersDir: path.join(packageRoot, 'helpers'),
     helperEnv,
     get helperTimeoutMs() {
-      return liveValue(config.helper.timeoutMs)
+      return currentSettings().helper.timeoutMs
     },
     get helperMaxOutputChars() {
-      return liveValue(config.helper.maxOutputChars)
+      return currentSettings().helper.maxOutputChars
     },
     get enableMaintenanceHelpers() {
-      return liveValue(config.helper.enableMaintenanceHelpers)
+      return currentSettings().helper.enableMaintenanceHelpers
     },
     get snapshot() {
+      const snapshot = currentSettings().snapshot
       return {
-        enabled: liveValue(config.snapshot.enabled),
-        generations: liveValue(config.snapshot.generations),
-        on: liveValue(config.snapshot.on),
-        everyWrites: liveValue(config.snapshot.everyWrites),
-        onDestructive: liveValue(config.snapshot.onDestructive),
-        compress: liveValue(config.snapshot.compress),
-        timeoutMs: liveValue(config.snapshot.timeoutMs),
+        enabled: snapshot.enabled,
+        generations: snapshot.generations,
+        on: snapshot.on,
+        everyWrites: snapshot.everyWrites,
+        onDestructive: snapshot.onDestructive,
+        compress: snapshot.compress,
+        timeoutMs: snapshot.timeoutMs,
       }
     },
     get guard() {
-      return { enabled: liveValue(config.guard.enabled) }
+      return { enabled: currentSettings().guard.enabled }
     },
     get audit() {
+      const audit = currentSettings().audit
       return {
-        enabled: liveValue(config.audit.enabled),
-        storeCode: liveValue(config.audit.storeCode),
+        enabled: audit.enabled,
+        storeCode: audit.storeCode,
       }
     },
     get taskRoot() {
-      return liveValue(config.taskRoot)
+      return currentSettings().taskRoot
     },
     get taskRootMode() {
-      return liveValue(config.taskRootMode)
+      return currentSettings().taskRootMode
     },
-    send: (code, overrides = {}) =>
-      sendExecute({
-        host: liveValue(config.host),
-        port: liveValue(config.port),
+    send: (code, overrides = {}) => {
+      const settings = currentSettings()
+      return sendExecute({
+        host: settings.host,
+        port: settings.port,
         code,
-        connectTimeoutMs: liveValue(config.connectTimeoutMs),
-        responseTimeoutMs: overrides.responseTimeoutMs ?? liveValue(config.responseTimeoutMs),
-        maxResponseChars: liveValue(config.maxResponseChars),
+        connectTimeoutMs: settings.connectTimeoutMs,
+        responseTimeoutMs: overrides.responseTimeoutMs ?? settings.responseTimeoutMs,
+        maxResponseChars: settings.maxResponseChars,
         signal: overrides.signal,
-      }),
+      })
+    },
     warn: (message) => {
       ctx.logger.warn(message)
     },
@@ -410,10 +369,10 @@ export function apply(ctx, config) {
     'blender-bridge: helper environment lifecycle',
   )
 
-  // Settings-page channel. It is a core connection Fetch route (the same
+  // Settings-page channels. They are core connection Fetch routes (the same
   // authenticated mechanism the built-in /api/file route uses); hosts without
-  // that service (TUI, minimal SDK profiles) simply skip it and the settings
-  // card falls back to the CLI command.
+  // that service (TUI, minimal SDK profiles) simply skip them and the JSON
+  // files remain editable by hand.
   ctx.inject(['connection'], (/** @type {any} */ connectionCtx) => {
     const connection = connectionCtx.get('connection')
     if (!connection || typeof connection.fetch?.register !== 'function') return
@@ -422,23 +381,25 @@ export function apply(ctx, config) {
      * @returns {Promise<import('./lib/handshake.js').LiveSessionInfo | null>} live facts, when available
      */
     const probeBlenderFacts = async (signal) => {
-      if (liveValue(config.helper.basePython).trim() !== '') return null
+      const settings = currentSettings()
+      if (settings.helper.basePython.trim() !== '') return null
       const info = await handshake({
-        host: liveValue(config.host),
-        port: liveValue(config.port),
-        connectTimeoutMs: liveValue(config.connectTimeoutMs),
-        responseTimeoutMs: Math.min(liveValue(config.responseTimeoutMs), 15000),
-        maxResponseChars: liveValue(config.maxResponseChars),
+        host: settings.host,
+        port: settings.port,
+        connectTimeoutMs: settings.connectTimeoutMs,
+        responseTimeoutMs: Math.min(settings.responseTimeoutMs, 15000),
+        maxResponseChars: settings.maxResponseChars,
         signal,
       })
       helperEnv.noteBlenderSession(info)
       return info
     }
-    const handlers = createHelperEnvHandlers({
+    const envHandlers = createHelperEnvHandlers({
       env: helperEnv,
-      getHelpers: () => listHelpers(liveValue(config.helper.enableMaintenanceHelpers)),
+      getHelpers: () => listHelpers(currentSettings().helper.enableMaintenanceHelpers),
       probeBlenderFacts,
     })
+    const settingsHandlers = createSettingsHandlers({ store: settings })
     connectionCtx.effect(
       () => {
         try {
@@ -447,7 +408,7 @@ export function apply(ctx, config) {
             methods: ['GET', 'POST'],
             requestBody: 'buffered',
             fetch: (/** @type {Request} */ request) =>
-              request.method === 'POST' ? handlers.install(request) : handlers.status(request),
+              request.method === 'POST' ? envHandlers.install(request) : envHandlers.status(request),
           })
         } catch (error) {
           ctx.logger.warn(`helper environment route registration failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -455,6 +416,23 @@ export function apply(ctx, config) {
         }
       },
       'blender-bridge: helper environment route',
+    )
+    connectionCtx.effect(
+      () => {
+        try {
+          return connection.fetch.register({
+            path: SETTINGS_PATH,
+            methods: ['GET', 'POST'],
+            requestBody: 'buffered',
+            fetch: (/** @type {Request} */ request) =>
+              request.method === 'POST' ? settingsHandlers.post(request) : settingsHandlers.get(),
+          })
+        } catch (error) {
+          ctx.logger.warn(`settings route registration failed: ${error instanceof Error ? error.message : String(error)}`)
+          return () => {}
+        }
+      },
+      'blender-bridge: settings route',
     )
   })
 

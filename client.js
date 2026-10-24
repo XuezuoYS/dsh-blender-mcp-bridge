@@ -1,10 +1,11 @@
 /**
  * Browser half of dsh-blender-mcp-bridge: the graphics configuration page.
  *
- * The page renders into the Plugins page's `plugins.bundle.config` slot and
- * edits the plugin's volatile Config through `ctx.configForms`. Every field is
- * saved with one atomic mutation, so a half-finished form never reaches the
- * profile patch. Copy is registered in the `blenderBridge` locale namespace.
+ * The page renders into the Settings page's `settings.section` slot and edits
+ * the plugin's own settings files through GET/POST
+ * `/api/blender-bridge/settings`; the DSH profile is no longer the store. Every
+ * field is saved with one atomic mutation, so a half-finished form never
+ * reaches the files. Copy is registered in the `blenderBridge` locale namespace.
  */
 
 window.__ModuleLoader__.load({
@@ -15,10 +16,10 @@ window.__ModuleLoader__.load({
 
     /** Locale namespace owned by this browser half. */
     const NS = 'blenderBridge'
-    /** Loader entry id, also the settings namespace and slot key. */
-    const ENTRY_ID = 'dsh-blender-mcp-bridge'
     /** Host route that reports and installs the managed helper environment. */
     const ENV_ENDPOINT = '/api/blender-bridge/helper-env'
+    /** Host route for the plugin's own settings files. */
+    const SETTINGS_ENDPOINT = '/api/blender-bridge/settings'
     /** Display order for the four pinned packages. */
     const PACKAGE_ORDER = ['numpy', 'Pillow', 'opencv-python-headless', 'scipy']
 
@@ -27,7 +28,7 @@ window.__ModuleLoader__.load({
       title: 'Blender MCP 插件桥',
       navLabel: 'Blender MCP',
       tagline: '让 AI 在你打开的 Blender 会话里安全地工作',
-      heroMeta: '写入 profile 配置，保存后立即生效',
+      heroMeta: '保存到 DSH_HOME/dsh-blender-mcp-bridge/ 下的设置文件，立即生效',
       badgeLive: '保存后即时生效',
       badgeCustom: '已自定义',
       factSave: '插件不会保存 .blend，也不会退出 Blender；改动可用 Ctrl+Z 逐步撤销。',
@@ -113,9 +114,9 @@ window.__ModuleLoader__.load({
       saved: '已保存，配置立即生效。',
       defaultsLoaded: '已载入默认值，记得保存。',
       loadingTitle: '正在读取插件配置…',
-      loadingHint: '从当前 profile 和运行中的插件读取。',
+      loadingHint: '从插件自己的配置文件读取。',
       unavailableTitle: '配置表单暂不可用',
-      unavailableHint: '当前部署没有提供配置表单服务；仍可在 cordis.patch.yml 中修改。',
+      unavailableHint: '设置通道不可用；可以直接编辑 DSH_HOME/dsh-blender-mcp-bridge/*.json，或刷新页面重试。',
       errorRequired: '请填写',
       errorRangeInt: '请输入 {min}–{max} 之间的整数',
       errorRangeSeconds: '请输入 {min}–{max} 秒',
@@ -124,7 +125,7 @@ window.__ModuleLoader__.load({
       errorSave: '保存失败：{message}',
       errorConflict: '配置已在别处更新，请重新载入后再保存。',
       errorBoundary: '这个设置区块遇到问题，插件本身不受影响。',
-      errorBoundaryHint: '可以刷新页面重试，或直接在 cordis.patch.yml 中修改。',
+      errorBoundaryHint: '可以刷新页面重试，或直接编辑 DSH_HOME/dsh-blender-mcp-bridge/*.json。',
       customized: '已自定义',
       dirtyField: '有未保存的修改',
       rangeSeconds: '范围 {min}–{max} 秒',
@@ -187,7 +188,7 @@ window.__ModuleLoader__.load({
       title: 'dsh-blender-mcp-bridge',
       navLabel: 'Blender MCP',
       tagline: 'Let the model work safely in the Blender session you have open',
-      heroMeta: 'Saves to the profile config and applies immediately',
+      heroMeta: 'Saved to the plugin config files under DSH_HOME/dsh-blender-mcp-bridge and applied immediately',
       badgeLive: 'Applies on save',
       badgeCustom: 'Customized',
       factSave: 'The plugin never saves the .blend and never quits Blender; undo with Ctrl+Z.',
@@ -273,9 +274,9 @@ window.__ModuleLoader__.load({
       saved: 'Saved. The configuration is live.',
       defaultsLoaded: 'Defaults loaded; save to apply them.',
       loadingTitle: 'Reading plugin configuration…',
-      loadingHint: 'From the current profile and the running plugin.',
+      loadingHint: 'From the plugin\'s own config files.',
       unavailableTitle: 'Configuration form unavailable',
-      unavailableHint: 'This deployment has no configuration form service; edit cordis.patch.yml instead.',
+      unavailableHint: 'The settings channel is unavailable; edit DSH_HOME/dsh-blender-mcp-bridge/*.json or reload the page.',
       errorRequired: 'Required',
       errorRangeInt: 'Enter an integer from {min} to {max}',
       errorRangeSeconds: 'Enter a value from {min} to {max} seconds',
@@ -284,7 +285,7 @@ window.__ModuleLoader__.load({
       errorSave: 'Save failed: {message}',
       errorConflict: 'The configuration changed elsewhere; reload before saving.',
       errorBoundary: 'This settings section hit a problem; the plugin itself is unaffected.',
-      errorBoundaryHint: 'Reload the page, or edit cordis.patch.yml directly.',
+      errorBoundaryHint: 'Reload the page, or edit DSH_HOME/dsh-blender-mcp-bridge/*.json directly.',
       customized: 'Customized',
       dirtyField: 'Unsaved change',
       rangeSeconds: 'Range {min}–{max} s',
@@ -1002,6 +1003,94 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Config-form adapter over the plugin's own settings files.
+     *
+     * It mimics the `ctx.configForms` store surface used by SettingsPanel, so
+     * the draft/validation/save logic stays unchanged while the source of truth
+     * becomes GET/POST /api/blender-bridge/settings.
+     *
+     * @returns {{ getSnapshot: () => any, subscribe: (listener: () => void) => () => void, mutate: (ops: any[], expectedRevision: string) => Promise<boolean> }} form store
+     */
+    function createRemoteSettingsForm() {
+      let snapshot = { status: 'loading' }
+      const listeners = new Set()
+      let started = false
+
+      const emit = () => {
+        for (const listener of listeners) listener()
+      }
+
+      /** @param {any} body @returns {boolean} whether the body was a usable snapshot */
+      const applyBody = (body) => {
+        if (body === null || typeof body !== 'object' || body.status !== 'ready' || body.value === null) return false
+        snapshot = {
+          status: 'ready',
+          value: body.value,
+          base: body.base,
+          revision: typeof body.revision === 'string' ? body.revision : '',
+          writable: body.writable !== false,
+        }
+        emit()
+        return true
+      }
+
+      const refresh = async () => {
+        try {
+          const response = await fetch(SETTINGS_ENDPOINT, { credentials: 'same-origin', cache: 'no-store' })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const body = await response.json()
+          if (!applyBody(body)) throw new Error('invalid settings response')
+        } catch {
+          snapshot = { status: 'unavailable' }
+          emit()
+        }
+      }
+
+      const start = () => {
+        if (started && snapshot.status !== 'unavailable') return
+        started = true
+        if (snapshot.status === 'unavailable') snapshot = { status: 'loading' }
+        void refresh()
+      }
+
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: (listener) => {
+          listeners.add(listener)
+          start()
+          return () => {
+            listeners.delete(listener)
+          }
+        },
+        mutate: async (ops, expectedRevision) => {
+          const response = await fetch(SETTINGS_ENDPOINT, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ops, expectedRevision }),
+          })
+          /** @type {any} */
+          let body = null
+          try {
+            body = await response.json()
+          } catch {
+            body = null
+          }
+          if (response.status === 409) {
+            applyBody(body)
+            return false
+          }
+          if (!response.ok) {
+            const message = body && body.error && body.error.message ? String(body.error.message) : `HTTP ${response.status}`
+            throw new Error(message)
+          }
+          if (!applyBody(body)) throw new Error('invalid settings response')
+          return true
+        },
+      }
+    }
+
+    /**
      * Read and poll the managed helper environment status.
      *
      * @returns {{ env: any, error: string, busy: boolean, install: (action: string) => Promise<void>, recheck: () => void }} status and actions
@@ -1221,7 +1310,8 @@ window.__ModuleLoader__.load({
     }
 
     /** @param {any} props @returns {any} */
-    function SettingsPanel({ t, form, locale }) {
+    function SettingsPanel({ t, locale }) {
+      const form = React.useMemo(() => createRemoteSettingsForm(), [])
       const subscribe = React.useCallback((listener) => form.subscribe(listener), [form])
       const getSnapshot = React.useCallback(() => form.getSnapshot(), [form])
       const snapshot = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -1529,7 +1619,6 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'blender-bridge: settings dictionary')
       const t = ctx.locale.bind(NS)
-      const form = ctx.configForms.get(ENTRY_ID)
       ctx.effect(
         () =>
           ctx.slots.inject('settings.section', () =>
@@ -1541,7 +1630,7 @@ window.__ModuleLoader__.load({
                 label: () => t('navLabel'),
               },
               (props) => {
-                return h(SettingsBoundary, { t }, h(SettingsPanel, { ...props, t, form, locale: ctx.locale }))
+                return h(SettingsBoundary, { t }, h(SettingsPanel, { ...props, t, locale: ctx.locale }))
               },
             ),
           ),
@@ -1549,6 +1638,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    return { inject: ['slots', 'locale', 'configForms'], apply }
+    return { inject: ['slots', 'locale'], apply }
   },
 })

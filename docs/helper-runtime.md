@@ -60,20 +60,26 @@ scipy==1.18.1
 ### 3.2 位置与底座
 
 ```text
-<DSH_HOME>/dsh-blender-mcp-bridge/python/
-├─ venv/                 # 唯一运行环境（普通 venv，不带 system-site-packages）
-├─ venv.json             # 安装标记：底座、包版本、lock 哈希
-├─ base.json             # 最近一次看到的 Blender Python
-├─ install-state.json    # idle / running / failed / interrupted
-├─ install.lock          # Host 与 CLI 共用的单飞锁
-└─ install.log           # 安装日志
+<DSH_HOME>/dsh-blender-mcp-bridge/
+├─ connection.json        # 其它设置见 docs/settings-ui.md
+├─ snapshot.json
+├─ safety.json
+├─ task.json
+├─ helper.json            # basePython / pipIndexUrl / helper 设置
+└─ python/
+   ├─ venv/               # 唯一运行环境（普通 venv，不带 system-site-packages）
+   ├─ venv.json           # 安装标记：底座、包版本、lock 哈希
+   ├─ base.json           # 最近一次看到的 Blender Python
+   ├─ install-state.json  # idle / running / failed / interrupted
+   ├─ install.lock        # Host 与 CLI 共用的单飞锁
+   └─ install.log         # 安装日志
 ```
 
 `DSH_HOME` 取 `process.env.DSH_HOME`，缺省 `~/.dsh`（Windows 是 `%USERPROFILE%\.dsh`）。
 
 底座按优先级取：
 
-1. 配置 `helper.basePython`（显式路径；空 = 使用 Blender 自带 Python）；
+1. `helper.json` 里的 `helper.basePython`（显式路径；空 = 使用 Blender 自带 Python）；
 2. 本进程最近一次握手拿到的 `sys.executable`；
 3. `base.json` 里记录的上次底座；
 4. `venv.json` 里记录过的安装底座。
@@ -221,16 +227,26 @@ v1 仍只有 `blender_mcp_helpers` 和 `blender_mcp_helper` 两个 helper 工具
 
 ## 7. 配置
 
-```yaml
-helper:
-  basePython: ''        # 空 = 使用 Blender 自带 Python；只在安装 venv 时使用
-  pipIndexUrl: ''       # 空 = PyPI；也可以填公司镜像或代理镜像
-  timeoutMs: 120000
-  maxOutputChars: 200000
-  enableMaintenanceHelpers: false
+helper 相关设置存在 `DSH_HOME/dsh-blender-mcp-bridge/helper.json`，和其它设置文件一起由插件自己的设置页管理（见 [`settings-ui.md`](settings-ui.md)）：
+
+```json
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-25T00:00:00.000Z",
+  "values": {
+    "helper": {
+      "basePython": "",
+      "pipIndexUrl": "",
+      "timeoutMs": 120000,
+      "maxOutputChars": 200000,
+      "enableMaintenanceHelpers": false
+    }
+  }
+}
 ```
 
-- `analysisPython` / `autoDetectPython` 已删除。旧 profile 里残留的键会被忽略，不影响加载；
+- `analysisPython` / `autoDetectPython` 已删除。旧 profile 里残留的键会在首次迁移时丢弃，不影响加载；
+- **设置文件是唯一来源**：DSH profile 的 `cordis.patch.yml` 只在文件不存在时提供一次迁移值，之后修改 profile 不会影响插件；手工改 `helper.json` 约 1 秒内生效；
 - `basePython` 只在创建/重建 venv 时使用；日常运行只认固定 venv；
 - `pipIndexUrl` 支持 `http://` / `https://`；`http://` 会自动追加 `--trusted-host`；
 - 代理和证书交给 pip 自己的配置文件（`%APPDATA%\pip\pip.ini` 等），插件不向子进程传凭据环境变量；

@@ -53,7 +53,7 @@ function loadBundle() {
 test('the client bundle registers the Settings-panel page', () => {
   const { definition, exports } = loadBundle()
   assert.equal(definition.id, 'dsh-blender-mcp-bridge')
-  assert.deepEqual(Array.from(exports.inject), ['slots', 'locale', 'configForms'])
+  assert.deepEqual(Array.from(exports.inject), ['slots', 'locale'])
 
   /** @type {{ locale: any[], injected: any[], registered: any[], forms: string[] }} */
   const calls = { locale: [], injected: [], registered: [], forms: [] }
@@ -119,7 +119,7 @@ test('the client bundle registers the Settings-panel page', () => {
   assert.equal(calls.locale[0].dicts.zh.title, 'Blender MCP 插件桥')
   assert.equal(calls.locale[0].dicts.en.title, 'dsh-blender-mcp-bridge')
   assert.deepEqual(Object.keys(calls.locale[0].dicts.zh).sort(), Object.keys(calls.locale[0].dicts.en).sort())
-  assert.deepEqual(calls.forms, ['dsh-blender-mcp-bridge'])
+  assert.deepEqual(calls.forms, [])
   assert.equal(calls.injected.length, 1)
   assert.equal(calls.injected[0].name, 'settings.section')
 

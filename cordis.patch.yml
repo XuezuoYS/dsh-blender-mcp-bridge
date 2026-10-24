@@ -1,8 +1,11 @@
 # dsh-blender-mcp-bridge — DSH bundle patch
 #
 # The entry has the same id as the package name so the profile can target it
-# with per-key overrides. Config defaults also live in the plugin's Config
-# schema; this block lists the full set so the active values are visible.
+# with per-key overrides. The values below are the bundled defaults: they seed
+# the plugin's own settings files on first run (DSH_HOME/dsh-blender-mcp-bridge/
+# connection.json, snapshot.json, safety.json, task.json, helper.json) and are
+# not the runtime source of truth after that. The settings page edits the JSON
+# files; profile overrides are ignored once those files exist.
 - insert:
     - id: dsh-blender-mcp-bridge
       name: dsh-blender-mcp-bridge

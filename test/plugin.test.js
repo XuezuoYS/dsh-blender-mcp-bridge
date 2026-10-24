@@ -6,11 +6,17 @@
  */
 
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { apply, Config } from '../index.js'
+import { settingsDir } from '../lib/settingsStore.js'
 import { wrapExecCode } from '../lib/tools.js'
+
+// The plugin now owns its settings files. Keep every apply() in this file away
+// from the real user home.
+process.env.DSH_HOME = mkdtempSync(path.join(os.tmpdir(), 'dsh-plugin-test-'))
 
 /** Minimal config matching the schema defaults. */
 const CONFIG = /** @type {any} */ (Config({}))
@@ -166,13 +172,47 @@ test('apply registers the full tool surface', () => {
   }
 })
 
-test('apply registers the helper environment route on the connection service', () => {
+test('apply registers the helper environment and settings routes', () => {
   const { routes } = runApply()
-  assert.equal(routes.length, 1)
-  assert.equal(routes[0].path, '/api/blender-bridge/helper-env')
-  assert.deepEqual(routes[0].methods, ['GET', 'POST'])
-  assert.equal(routes[0].requestBody, 'buffered')
-  assert.equal(typeof routes[0].fetch, 'function')
+  assert.equal(routes.length, 2)
+  const envRoute = routes.find((route) => route.path === '/api/blender-bridge/helper-env')
+  const settingsRoute = routes.find((route) => route.path === '/api/blender-bridge/settings')
+  assert.ok(envRoute)
+  assert.ok(settingsRoute)
+  for (const route of [envRoute, settingsRoute]) {
+    assert.deepEqual(route.methods, ['GET', 'POST'])
+    assert.equal(route.requestBody, 'buffered')
+    assert.equal(typeof route.fetch, 'function')
+  }
+})
+
+test('the settings route reads and writes the plugin files', async () => {
+  const { routes } = runApply()
+  const route = routes.find((candidate) => candidate.path === '/api/blender-bridge/settings')
+  assert.ok(route)
+  const getResponse = await route.fetch(new Request('http://localhost/api/blender-bridge/settings'))
+  assert.equal(getResponse.status, 200)
+  const snapshot = await getResponse.json()
+  assert.equal(snapshot.status, 'ready')
+  assert.equal(typeof snapshot.revision, 'string')
+  assert.equal(snapshot.base.port, 9876)
+  const before = snapshot.value.port
+  const next = before === 9876 ? 9877 : 9876
+  const postResponse = await route.fetch(
+    new Request('http://localhost/api/blender-bridge/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ops: [{ op: 'set', path: ['port'], value: next }], expectedRevision: snapshot.revision }),
+    }),
+  )
+  assert.equal(postResponse.status, 200)
+  const saved = await postResponse.json()
+  assert.equal(saved.value.port, next)
+  const file = path.join(settingsDir(process.env.DSH_HOME ?? ''), 'connection.json')
+  assert.equal(existsSync(file), true)
+  const parsed = JSON.parse(readFileSync(file, 'utf8'))
+  assert.equal(parsed.values.port, next)
+  assert.equal(existsSync(path.join(settingsDir(process.env.DSH_HOME ?? ''), 'settings.json')), false)
 })
 
 test('apply registers one system prompt section with the no-rollback rule', () => {
