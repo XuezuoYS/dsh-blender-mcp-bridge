@@ -25,41 +25,68 @@ export const name = 'dsh-blender-mcp-bridge'
 /** Services this plugin needs before it can activate. */
 export const inject = ['tools', 'systemPrompt']
 
-/** Validated plugin configuration. */
+/**
+ * Validated plugin configuration.
+ *
+ * Every field is volatile: DSH's settings service turns these into live
+ * references, so the graphics settings page can change one without restarting
+ * the plugin (or interrupting a running turn). Code in this file reads them
+ * through `liveValue()` on each use; never copy them into a long-lived object.
+ */
 export const Config = z.object({
-  host: z.string().default('127.0.0.1'),
-  port: z.natural().min(1).max(65535).default(9876),
-  connectTimeoutMs: z.natural().min(100).default(5000),
-  responseTimeoutMs: z.natural().min(1000).default(30000),
-  captureTimeoutMs: z.natural().min(1000).default(30000),
-  renderTimeoutMs: z.natural().min(1000).default(120000),
-  maxResponseChars: z.natural().min(1000).default(200000).description('Byte cap for one reply; the name is historical.'),
-  taskRootMode: z.union(['blendFile', 'workspace']).default('blendFile'),
-  taskRoot: z.string().default(''),
+  host: z.string().default('127.0.0.1').volatile(),
+  port: z.natural().min(1).max(65535).default(9876).volatile(),
+  connectTimeoutMs: z.natural().min(100).default(5000).volatile(),
+  responseTimeoutMs: z.natural().min(1000).default(30000).volatile(),
+  captureTimeoutMs: z.natural().min(1000).default(30000).volatile(),
+  renderTimeoutMs: z.natural().min(1000).default(120000).volatile(),
+  maxResponseChars: z
+    .natural()
+    .min(1000)
+    .default(200000)
+    .description('Byte cap for one reply; the name is historical.')
+    .volatile(),
+  taskRootMode: z.union(['blendFile', 'workspace']).default('blendFile').volatile(),
+  taskRoot: z.string().default('').volatile(),
   snapshot: z.object({
-    enabled: z.boolean().default(true),
-    generations: z.natural().min(1).max(20).default(3),
-    on: z.union(['turn', 'write', 'adaptive']).default('adaptive'),
-    everyWrites: z.natural().min(1).max(100).default(10),
-    onDestructive: z.boolean().default(true),
-    compress: z.boolean().default(true),
-    timeoutMs: z.natural().min(1000).default(120000),
+    enabled: z.boolean().default(true).volatile(),
+    generations: z.natural().min(1).max(20).default(3).volatile(),
+    on: z.union(['turn', 'write', 'adaptive']).default('adaptive').volatile(),
+    everyWrites: z.natural().min(1).max(100).default(10).volatile(),
+    onDestructive: z.boolean().default(true).volatile(),
+    compress: z.boolean().default(true).volatile(),
+    timeoutMs: z.natural().min(1000).default(120000).volatile(),
   }),
   guard: z.object({
-    enabled: z.boolean().default(true),
+    enabled: z.boolean().default(true).volatile(),
   }),
   helper: z.object({
-    analysisPython: z.string().default(''),
-    autoDetectPython: z.boolean().default(true),
-    timeoutMs: z.natural().min(1000).default(120000),
-    maxOutputChars: z.natural().min(1000).default(200000),
-    enableMaintenanceHelpers: z.boolean().default(false),
+    analysisPython: z.string().default('').volatile(),
+    autoDetectPython: z.boolean().default(true).volatile(),
+    timeoutMs: z.natural().min(1000).default(120000).volatile(),
+    maxOutputChars: z.natural().min(1000).default(200000).volatile(),
+    enableMaintenanceHelpers: z.boolean().default(false).volatile(),
   }),
   audit: z.object({
-    enabled: z.boolean().default(true),
-    storeCode: z.boolean().default(false),
+    enabled: z.boolean().default(true).volatile(),
+    storeCode: z.boolean().default(false).volatile(),
   }),
 })
+
+/**
+ * Read a configuration value that may be a live volatile reference.
+ *
+ * Schemastery wraps `.volatile()` fields and stores them in a reference read
+ * with `.get()`. Plain values still pass through, which keeps offline tests and
+ * direct `apply()` calls working.
+ *
+ * @param {any} value - plain value or volatile reference
+ * @returns {any} current plain value
+ */
+function liveValue(value) {
+  return value !== null && typeof value === 'object' && typeof value.get === 'function' ? value.get() : value
+}
+
 
 /** Model-facing safety rules; English on purpose (the model reads it). */
 export const SYSTEM_PROMPT = `You can work in the user's currently open Blender session through the blender_mcp_* tools. These tools talk to the official MCP add-on inside the running Blender process.
@@ -84,13 +111,26 @@ Ground rules:
 export function apply(ctx, config) {
   /** @type {Map<string, number>} session id -> current turn */
   const turns = new Map()
+  /**
+   * Live snapshot policy: the tracker reads these getters before every write,
+   * so a saved cadence change applies to the next call without a remount.
+   */
+  const snapshotPolicy = {
+    get enabled() {
+      return liveValue(config.snapshot.enabled)
+    },
+    get on() {
+      return liveValue(config.snapshot.on)
+    },
+    get everyWrites() {
+      return liveValue(config.snapshot.everyWrites)
+    },
+    get onDestructive() {
+      return liveValue(config.snapshot.onDestructive)
+    },
+  }
   /** Automatic-snapshot cadence state: session id + task dir -> counters. */
-  const snapshotState = createSnapshotTracker({
-    enabled: config.snapshot.enabled,
-    on: config.snapshot.on,
-    everyWrites: config.snapshot.everyWrites,
-    onDestructive: config.snapshot.onDestructive,
-  })
+  const snapshotState = createSnapshotTracker(snapshotPolicy)
   /** @type {Map<string, number>} session id -> undo steps pushed by the plugin (estimate) */
   const undoPushes = new Map()
   /** Per-session render-speed samples used for a rough "will this fit?" estimate. */
@@ -232,44 +272,84 @@ export function apply(ctx, config) {
     }
   }
 
-  /** @type {import('./lib/tools.js').BridgeOptions} */
+  /**
+   * Tool options. Configuration fields are getters: the settings page writes
+   * volatile references in place, and every tool call reads the current value.
+   *
+   * @type {import('./lib/tools.js').BridgeOptions}
+   */
   const options = {
-    host: config.host,
-    port: config.port,
-    connectTimeoutMs: config.connectTimeoutMs,
-    responseTimeoutMs: config.responseTimeoutMs,
-    captureTimeoutMs: config.captureTimeoutMs,
-    renderTimeoutMs: config.renderTimeoutMs,
-    maxResponseChars: config.maxResponseChars,
+    get host() {
+      return liveValue(config.host)
+    },
+    get port() {
+      return liveValue(config.port)
+    },
+    get connectTimeoutMs() {
+      return liveValue(config.connectTimeoutMs)
+    },
+    get responseTimeoutMs() {
+      return liveValue(config.responseTimeoutMs)
+    },
+    get captureTimeoutMs() {
+      return liveValue(config.captureTimeoutMs)
+    },
+    get renderTimeoutMs() {
+      return liveValue(config.renderTimeoutMs)
+    },
+    get maxResponseChars() {
+      return liveValue(config.maxResponseChars)
+    },
     helpersDir: path.join(path.dirname(fileURLToPath(import.meta.url)), 'helpers'),
-    pythonConfig: {
-      analysisPython: config.helper.analysisPython,
-      autoDetectPython: config.helper.autoDetectPython,
+    get pythonConfig() {
+      return {
+        analysisPython: liveValue(config.helper.analysisPython),
+        autoDetectPython: liveValue(config.helper.autoDetectPython),
+      }
     },
-    helperTimeoutMs: config.helper.timeoutMs,
-    helperMaxOutputChars: config.helper.maxOutputChars,
-    enableMaintenanceHelpers: config.helper.enableMaintenanceHelpers,
-    snapshot: {
-      enabled: config.snapshot.enabled,
-      generations: config.snapshot.generations,
-      on: config.snapshot.on,
-      everyWrites: config.snapshot.everyWrites,
-      onDestructive: config.snapshot.onDestructive,
-      compress: config.snapshot.compress,
-      timeoutMs: config.snapshot.timeoutMs,
+    get helperTimeoutMs() {
+      return liveValue(config.helper.timeoutMs)
     },
-    guard: { enabled: config.guard.enabled },
-    audit: { enabled: config.audit.enabled, storeCode: config.audit.storeCode },
-    taskRoot: config.taskRoot,
-    taskRootMode: config.taskRootMode,
+    get helperMaxOutputChars() {
+      return liveValue(config.helper.maxOutputChars)
+    },
+    get enableMaintenanceHelpers() {
+      return liveValue(config.helper.enableMaintenanceHelpers)
+    },
+    get snapshot() {
+      return {
+        enabled: liveValue(config.snapshot.enabled),
+        generations: liveValue(config.snapshot.generations),
+        on: liveValue(config.snapshot.on),
+        everyWrites: liveValue(config.snapshot.everyWrites),
+        onDestructive: liveValue(config.snapshot.onDestructive),
+        compress: liveValue(config.snapshot.compress),
+        timeoutMs: liveValue(config.snapshot.timeoutMs),
+      }
+    },
+    get guard() {
+      return { enabled: liveValue(config.guard.enabled) }
+    },
+    get audit() {
+      return {
+        enabled: liveValue(config.audit.enabled),
+        storeCode: liveValue(config.audit.storeCode),
+      }
+    },
+    get taskRoot() {
+      return liveValue(config.taskRoot)
+    },
+    get taskRootMode() {
+      return liveValue(config.taskRootMode)
+    },
     send: (code, overrides = {}) =>
       sendExecute({
-        host: config.host,
-        port: config.port,
+        host: liveValue(config.host),
+        port: liveValue(config.port),
         code,
-        connectTimeoutMs: config.connectTimeoutMs,
-        responseTimeoutMs: overrides.responseTimeoutMs ?? config.responseTimeoutMs,
-        maxResponseChars: config.maxResponseChars,
+        connectTimeoutMs: liveValue(config.connectTimeoutMs),
+        responseTimeoutMs: overrides.responseTimeoutMs ?? liveValue(config.responseTimeoutMs),
+        maxResponseChars: liveValue(config.maxResponseChars),
         signal: overrides.signal,
       }),
     warn: (message) => {

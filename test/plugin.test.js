@@ -89,18 +89,48 @@ function runApply(includeSkills = true) {
 }
 
 test('config defaults are applied and invalid values fail at load time', () => {
-  assert.equal(CONFIG.port, 9876)
-  assert.equal(CONFIG.snapshot.generations, 3)
-  assert.equal(CONFIG.snapshot.timeoutMs, 120000)
-  assert.equal(CONFIG.snapshot.on, 'adaptive')
-  assert.equal(CONFIG.snapshot.everyWrites, 10)
-  assert.equal(CONFIG.snapshot.onDestructive, true)
+  assert.equal(CONFIG.port.get(), 9876)
+  assert.equal(CONFIG.snapshot.generations.get(), 3)
+  assert.equal(CONFIG.snapshot.timeoutMs.get(), 120000)
+  assert.equal(CONFIG.snapshot.on.get(), 'adaptive')
+  assert.equal(CONFIG.snapshot.everyWrites.get(), 10)
+  assert.equal(CONFIG.snapshot.onDestructive.get(), true)
   assert.throws(() => Config({ port: 70000 }))
   assert.throws(() => Config({ snapshot: { generations: 99 } }))
   assert.throws(() => Config({ snapshot: { timeoutMs: 0 } }))
   assert.throws(() => Config({ snapshot: { on: 'sometimes' } }))
   assert.throws(() => Config({ snapshot: { everyWrites: 0 } }))
   assert.throws(() => Config({ taskRootMode: 'somewhere' }))
+})
+
+test('every graphics-settings field is a live volatile reference', () => {
+  const fields = [
+    CONFIG.host,
+    CONFIG.port,
+    CONFIG.connectTimeoutMs,
+    CONFIG.responseTimeoutMs,
+    CONFIG.captureTimeoutMs,
+    CONFIG.renderTimeoutMs,
+    CONFIG.maxResponseChars,
+    CONFIG.taskRootMode,
+    CONFIG.taskRoot,
+    CONFIG.snapshot.enabled,
+    CONFIG.snapshot.generations,
+    CONFIG.snapshot.on,
+    CONFIG.snapshot.everyWrites,
+    CONFIG.snapshot.onDestructive,
+    CONFIG.snapshot.compress,
+    CONFIG.snapshot.timeoutMs,
+    CONFIG.guard.enabled,
+    CONFIG.helper.analysisPython,
+    CONFIG.helper.autoDetectPython,
+    CONFIG.helper.timeoutMs,
+    CONFIG.helper.maxOutputChars,
+    CONFIG.helper.enableMaintenanceHelpers,
+    CONFIG.audit.enabled,
+    CONFIG.audit.storeCode,
+  ]
+  for (const field of fields) assert.equal(typeof field?.get, 'function')
 })
 
 test('apply registers the full tool surface', () => {

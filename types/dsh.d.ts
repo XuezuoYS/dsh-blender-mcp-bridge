@@ -52,6 +52,8 @@ declare module '@deepseek-ai/schemastery' {
     max(value: number): Schema
     step(value: number): Schema
     description(text: string): Schema
+    /** Parse this field into a live reference read with `get()`. */
+    volatile(): Schema
   }
 
   /** The `schemastery` schema factory. */
