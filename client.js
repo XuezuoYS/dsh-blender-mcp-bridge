@@ -137,8 +137,9 @@ window.__ModuleLoader__.load({
       placeholderPipIndex: '留空使用 PyPI',
       envBadgeReady: '辅助环境就绪',
       envBadgeInstalling: '辅助环境安装中',
-      envBadgeAttention: '辅助环境待安装',
-      envStateMissing: '未安装',
+      envBadgeMissing: 'Python 辅助环境未安装',
+      envBadgeAttention: 'Python 辅助环境需要处理',
+      envStateMissing: 'Python 辅助环境未安装',
       envStateIncomplete: '不完整',
       envStateBroken: '需要重建',
       envStateOutdated: '需要更新',
@@ -296,8 +297,9 @@ window.__ModuleLoader__.load({
       placeholderPipIndex: 'Empty uses PyPI',
       envBadgeReady: 'Helper env ready',
       envBadgeInstalling: 'Helper env installing',
-      envBadgeAttention: 'Helper env needs setup',
-      envStateMissing: 'Not installed',
+      envBadgeMissing: 'Python helper env not installed',
+      envBadgeAttention: 'Python helper env needs attention',
+      envStateMissing: 'Python helper env not installed',
       envStateIncomplete: 'Incomplete',
       envStateBroken: 'Needs rebuild',
       envStateOutdated: 'Needs update',
@@ -401,6 +403,8 @@ window.__ModuleLoader__.load({
 .bb-pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 11px; white-space: nowrap; }
 .bb-pill[data-tone="success"] { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 32%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent); }
 .bb-pill[data-tone="brand"] { color: var(--dsw-alias-brand-primary); border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 28%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent); }
+.bb-pill[data-tone="warn"] { color: var(--dsw-alias-state-warn-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 38%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 9%, transparent); }
+.bb-pill[data-tone="error"] { color: var(--dsw-alias-state-error-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); font-weight: 600; }
 .bb-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .bb-callout { display: flex; flex-direction: column; gap: 7px; margin: 14px 22px 10px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent); }
 .bb-fact { display: flex; align-items: flex-start; gap: 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
@@ -457,7 +461,10 @@ window.__ModuleLoader__.load({
 .bb-envHead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .bb-envDot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--dsw-alias-label-secondary); }
 .bb-envCard[data-state="ready"] .bb-envDot { background: var(--dsw-alias-state-success-primary); }
-.bb-envCard[data-state="missing"] .bb-envDot, .bb-envCard[data-state="incomplete"] .bb-envDot, .bb-envCard[data-state="broken"] .bb-envDot, .bb-envCard[data-state="outdated"] .bb-envDot { background: var(--dsw-alias-state-warn-primary); }
+.bb-envCard[data-state="incomplete"] .bb-envDot, .bb-envCard[data-state="broken"] .bb-envDot, .bb-envCard[data-state="outdated"] .bb-envDot { background: var(--dsw-alias-state-warn-primary); }
+.bb-envCard[data-state="missing"] { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 48%, var(--dsw-alias-border-l2)); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, var(--dsw-alias-bg-layer-2)); }
+.bb-envCard[data-state="missing"] .bb-envDot { background: var(--dsw-alias-state-error-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent); }
+.bb-envCard[data-state="missing"] .bb-envState { color: var(--dsw-alias-state-error-primary); }
 .bb-envState { font-size: 13px; font-weight: 600; }
 .bb-envMeta { color: color-mix(in srgb, var(--dsw-alias-label-secondary) 72%, transparent); font-size: 11.5px; }
 .bb-envGrid { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 10px; font-size: 11.5px; line-height: 17px; }
@@ -1386,11 +1393,32 @@ window.__ModuleLoader__.load({
           ? null
           : (() => {
               const installState = envStatus.env.install && envStatus.env.install.state
-              const ready = envStatus.env.state === 'ready'
-              const key = installState === 'running' ? 'envBadgeInstalling' : ready ? 'envBadgeReady' : 'envBadgeAttention'
-              const tone = installState === 'running' ? 'brand' : ready ? 'success' : undefined
+              const state = envStatus.env.state
+              const ready = state === 'ready'
+              const missing = state === 'missing'
+              const key =
+                installState === 'running'
+                  ? 'envBadgeInstalling'
+                  : ready
+                    ? 'envBadgeReady'
+                    : missing
+                      ? 'envBadgeMissing'
+                      : 'envBadgeAttention'
+              const tone = installState === 'running' ? 'brand' : ready ? 'success' : missing ? 'error' : 'warn'
               return h('span', { className: 'bb-pill', 'data-tone': tone }, h('span', { className: 'bb-dot' }), t(key))
             })()
+
+      // Keep the setup card in front until the environment is actually ready:
+      // a first install, an in-flight install, an update and a rebuild all
+      // need the card's controls, so only `ready` returns it to its normal slot.
+      const envReady =
+        envStatus.env !== null &&
+        envStatus.env.state === 'ready' &&
+        (!envStatus.env.install || envStatus.env.install.state !== 'running')
+      const envPinned = envStatus.env !== null && !envReady
+      const orderedGroups = envPinned
+        ? [...GROUPS.filter((group) => group.id === 'helperEnv'), ...GROUPS.filter((group) => group.id !== 'helperEnv')]
+        : GROUPS
 
       const advancedToggle = h(
         'button',
@@ -1456,7 +1484,7 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'bb-body' },
-          GROUPS.map((group) => renderGroup(group, false)),
+          orderedGroups.map((group) => renderGroup(group, false)),
           advancedToggle,
           advancedOpen ? h('div', { className: 'bb-advanced' }, renderGroup(ADVANCED_GROUP, true)) : null,
         ),
