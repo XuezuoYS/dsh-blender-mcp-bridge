@@ -34,6 +34,14 @@ guard, not a sandbox.
    `suggestedPath`; do not retry the same path.
 4. **Do not change render settings on your own.** Preview renders use the exact
    width/height/samples the user gave (`blender_mcp_render` restores settings).
+   For a long production render pass `timeoutMs` (1 s–30 min) instead of the
+   120 s default, or use `background: true` to return once the render started.
+   When a render returns `timeout` or `running`, Blender is still rendering:
+   call `blender_mcp_render_status` with the jobId instead of rendering again.
+   The status tool only reads the task directory, so it also works while
+   Blender is busy; every other Blender tool will time out until the render
+   finishes. The settings are restored when the render finishes; the plugin
+   does not cancel it for you.
 5. **Never roll back.** If something looks wrong (blocked write, `.blend`
    changed on disk, timeout, guard self-check failure, broken scene), stop, tell
    the user what happened with the snapshot path, and end the turn. The user
@@ -91,6 +99,8 @@ further back — the plugin never restores a snapshot by itself.
 | `get_scene_info` / `get_object_info` | `blender_mcp_inspect` |
 | `execute_blender_code` | `blender_mcp_exec` (`readOnly: true` for inspection) |
 | `get_viewport_screenshot` | `blender_mcp_capture` |
+| render preview / production still | `blender_mcp_render` (`timeoutMs`, `background`) |
+| collect a timed-out or background render | `blender_mcp_render_status` |
 | save versioned `.blend` | snapshots + `Ctrl+Z`; never save |
 | analysis/validation helpers | `blender_mcp_helpers` + `blender_mcp_helper` |
 

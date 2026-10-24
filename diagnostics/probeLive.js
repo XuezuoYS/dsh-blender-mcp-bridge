@@ -10,7 +10,7 @@
  *   set DSH_BLENDER_PORT=9877 && node diagnostics/probeLive.js
  */
 
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { captureCode, readPngSize } from '../lib/capture.js'
@@ -186,11 +186,23 @@ result = {
 `
   const before = (await send(readSettings)).result
   const renderPath = path.join(workDir, 'probe-render.png')
-  const render = await send(renderCode({ filePath: renderPath, width: 160, height: 90, samples: 8 }), 120000)
+  const renderStatusPath = path.join(workDir, 'probe-render.render.json')
+  const render = await send(renderCode({ filePath: renderPath, statusPath: renderStatusPath, jobId: 'probe-render', width: 160, height: 90, samples: 8 }), 120000)
   const after = (await send(readSettings)).result
   const same = JSON.stringify(before) === JSON.stringify(after)
   record('preview render', render.status === 'ok' && existsSync(renderPath), `bytes=${existsSync(renderPath) ? statSync(renderPath).size : 0}, engine=${String(after?.engine)}`)
   record('render settings fully restored', same, same ? '' : `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+  let renderStatus = null
+  try {
+    renderStatus = JSON.parse(readFileSync(renderStatusPath, 'utf8'))
+  } catch {
+    renderStatus = null
+  }
+  record(
+    'render status file ends done',
+    renderStatus?.state === 'done' && renderStatus?.path === renderPath,
+    renderStatus === null ? 'missing status file' : `state=${String(renderStatus.state)}`,
+  )
 
   if (setup.result?.created === true) {
     const cleanup = await send(`import bpy

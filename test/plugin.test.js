@@ -113,6 +113,7 @@ test('apply registers the full tool surface', () => {
     'blender_mcp_helpers',
     'blender_mcp_inspect',
     'blender_mcp_render',
+    'blender_mcp_render_status',
     'blender_mcp_snapshot',
     'blender_mcp_status',
   ])
@@ -145,6 +146,31 @@ test('the exec contract documents readOnly, the snapshot policy and the undo usa
   assert.ok(parameters.properties && Object.hasOwn(parameters.properties, 'readOnly'))
 })
 
+test('the render contract documents per-call timeouts, background starts and recovery', () => {
+  const { tools } = runApply()
+  const renderTool = tools.find((tool) => tool.name === 'blender_mcp_render')
+  const statusTool = tools.find((tool) => tool.name === 'blender_mcp_render_status')
+  assert.ok(renderTool)
+  assert.ok(statusTool)
+  assert.match(renderTool.description, /timeoutMs/)
+  assert.match(renderTool.description, /background: true/)
+  assert.match(renderTool.description, /blender_mcp_render_status/)
+  const parameters = /** @type {{ properties?: Record<string, unknown> }} */ (renderTool.parameters)
+  assert.ok(parameters.properties && Object.hasOwn(parameters.properties, 'timeoutMs'))
+  assert.ok(parameters.properties && Object.hasOwn(parameters.properties, 'background'))
+  assert.match(statusTool.description, /running, finished or failed/)
+  assert.doesNotMatch(statusTool.description, /undo step/)
+  const statusParameters = /** @type {{ properties?: Record<string, unknown> }} */ (statusTool.parameters)
+  assert.ok(statusParameters.properties && Object.hasOwn(statusParameters.properties, 'jobId'))
+})
+
+test('the system prompt explains render timeouts and the status recovery tool', () => {
+  const { sections } = runApply()
+  const section = /** @type {{ text: string }} */ (sections[0])
+  assert.match(section.text, /timeoutMs/)
+  assert.match(section.text, /blender_mcp_render_status/)
+})
+
 test('registers the live-session skill when the skills service exists', () => {
   const { skills } = runApply()
   assert.equal(skills.length, 1)
@@ -154,13 +180,14 @@ test('registers the live-session skill when the skills service exists', () => {
   assert.ok(skill.description.length > 0)
   assert.match(skill.content, /Never roll back/)
   assert.match(skill.content, /blender_mcp_exec/)
+  assert.match(skill.content, /blender_mcp_render_status/)
   assert.equal(skill.resourceBase.kind, 'directory')
   assert.match(skill.resourceBase.path, /skills[\\/]blender-live-session$/)
 })
 
 test('apply works without a skills service', () => {
   const { tools, skills } = runApply(false)
-  assert.equal(tools.length, 8)
+  assert.equal(tools.length, 9)
   assert.equal(skills.length, 0)
 })
 

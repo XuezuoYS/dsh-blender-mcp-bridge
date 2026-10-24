@@ -4,12 +4,14 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { captureCode, captureFileName, createCapture, readPngSize } from '../lib/capture.js'
-import { createRender, renderCode, renderFileName } from '../lib/render.js'
+import { ProtocolError } from '../lib/protocol.js'
+import { createRender, renderCode, renderFileName, RenderTimeoutError, RENDER_START_TIMEOUT_MS } from '../lib/render.js'
+import { renderStatusPathFor } from '../lib/renderStatus.js'
 import { ensureTaskDir } from '../lib/taskDir.js'
 
 /**
@@ -84,6 +86,12 @@ test('render payload sets and restores every touched setting', () => {
   assert.ok(code.includes("_before['eevee_samples']"))
   assert.ok(code.includes("_before['cycles_samples']"))
   assert.ok(code.includes("_before['cycles_denoise']"))
+  assert.match(code, /_status_path = "C:\/proj\/\.dsh-blender-lamp\/renders\/a\.render\.json"/)
+  assert.match(code, /'jobId': "a"/)
+  assert.match(code, /_dsh_write_status\(_job\)/)
+  assert.match(code, /'state': 'running'/)
+  assert.match(code, /_job\['state'\] = _state/)
+  assert.match(code, /_job\['finishedAtMs'\] = int\(time\.time\(\) \* 1000\)/)
   assert.match(renderFileName(undefined), /^render-\d{17}\.png$/)
 })
 
@@ -117,9 +125,100 @@ test('createRender writes into renders/ and reports engine and samples', async (
     timeoutMs: 1000,
   })
   assert.match(result.path, /renders[\\/]render-\d{17}\.png$/)
+  assert.match(result.jobId, /^render-\d{17}$/)
+  assert.equal(result.statusPath, renderStatusPathFor(result.path))
+  assert.equal(result.state, 'done')
+  assert.equal(result.background, false)
   assert.equal(result.width, 640)
   assert.equal(result.engine, 'BLENDER_EEVEE')
   assert.equal(result.samples, 16)
+})
+
+/**
+ * Sender that records the job as running, then reports a lost reply.
+ *
+ * @param {boolean} writeRunning - whether to simulate the Python status write
+ * @returns {(code: string) => Promise<never>} fake sender
+ */
+function timeoutSender(writeRunning) {
+  return async (code) => {
+    if (writeRunning) {
+      const statusMatch = /_status_path = ("(?:\\.|[^"\\])*")/.exec(code)
+      const jobMatch = /'jobId': ("(?:\\.|[^"\\])*")/.exec(code)
+      const fileMatch = /render\.filepath = ("(?:\\.|[^"\\])*")/.exec(code)
+      assert.ok(statusMatch && jobMatch && fileMatch)
+      await writeFile(
+        JSON.parse(statusMatch[1]),
+        JSON.stringify({
+          version: 1,
+          jobId: JSON.parse(jobMatch[1]),
+          path: JSON.parse(fileMatch[1]),
+          state: 'running',
+          startedAtMs: Date.now(),
+          finishedAtMs: null,
+          width: 640,
+          height: 360,
+          resolutionPercentage: 100,
+          samples: 16,
+          engine: 'BLENDER_EEVEE',
+          timeoutMs: 0,
+          background: false,
+          bytes: 0,
+          error: null,
+        }),
+      )
+    }
+    throw new ProtocolError('response-timeout', 'no reply')
+  }
+}
+
+test('createRender turns a timeout into a job-aware RenderTimeoutError', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-visual-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  await assert.rejects(
+    createRender({
+      taskDir: task.dir,
+      width: 640,
+      height: 360,
+      samples: 16,
+      send: timeoutSender(true),
+      timeoutMs: 1234,
+    }),
+    (error) => {
+      assert.ok(error instanceof RenderTimeoutError)
+      assert.equal(error.details?.reason, 'deadline')
+      assert.equal(error.details?.timeoutMs, 1234)
+      assert.equal(error.details?.state, 'running')
+      assert.equal(error.details?.background, false)
+      assert.match(String(error.details?.jobId), /^render-\d{17}$/)
+      assert.equal(error.details?.statusPath, renderStatusPathFor(String(error.details?.path)))
+      assert.ok(Number(error.details?.elapsedMs) >= 0)
+      return true
+    },
+  )
+})
+
+test('a background start that cannot be confirmed is reported as a start timeout', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-visual-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  await assert.rejects(
+    createRender({
+      taskDir: task.dir,
+      width: 640,
+      height: 360,
+      samples: 16,
+      send: timeoutSender(false),
+      background: true,
+    }),
+    (error) => {
+      assert.ok(error instanceof RenderTimeoutError)
+      assert.equal(error.details?.reason, 'start-timeout')
+      assert.equal(error.details?.timeoutMs, RENDER_START_TIMEOUT_MS)
+      assert.equal(error.details?.state, 'missing')
+      assert.equal(error.details?.background, true)
+      return true
+    },
+  )
 })
 
 test('a failed capture is reported with a readable error', async () => {

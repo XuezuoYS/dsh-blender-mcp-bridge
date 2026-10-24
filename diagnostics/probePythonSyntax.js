@@ -37,7 +37,27 @@ const payloads = [
   ['capture.py', captureCode(path.join(workDir, 'shot.png'))],
   [
     'render.py',
-    renderCode({ filePath: path.join(workDir, 'render.png'), width: 640, height: 360, samples: 16 }),
+    renderCode({
+      filePath: path.join(workDir, 'render.png'),
+      statusPath: path.join(workDir, 'render.render.json'),
+      jobId: 'render-probe',
+      width: 640,
+      height: 360,
+      samples: 16,
+      timeoutMs: 120000,
+    }),
+  ],
+  [
+    'render-background.py',
+    renderCode({
+      filePath: path.join(workDir, 'render-background.png'),
+      statusPath: path.join(workDir, 'render-background.render.json'),
+      jobId: 'render-background-probe',
+      width: 640,
+      height: 360,
+      samples: 16,
+      background: true,
+    }),
   ],
   [
     'exec-guarded.py',

@@ -9,6 +9,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import {
   ensureTaskDir,
+  findTaskDir,
   isInsideTask,
   listSnapshots,
   listTaskDirs,
@@ -62,6 +63,22 @@ test('an unmarked existing directory is treated as someone else data', async () 
   await mkdir(path.join(root, '.dsh-blender-lamp'), { recursive: true })
   const claimed = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
   assert.equal(claimed.name, '.dsh-blender-lamp-2')
+})
+
+test('findTaskDir finds an owned directory but never creates one', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-task-'))
+  assert.equal(await findTaskDir({ root, task: 'lamp', sessionId: 's1' }), null)
+
+  const first = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  const found = await findTaskDir({ root, task: 'LAMP', sessionId: 's1' })
+  assert.equal(found?.dir, first.dir)
+  assert.equal(found?.created, false)
+  assert.equal(await findTaskDir({ root, task: 'lamp', sessionId: 's2' }), null)
+
+  const second = await ensureTaskDir({ root, task: 'lamp', sessionId: 's2' })
+  const foundSecond = await findTaskDir({ root, task: 'lamp', sessionId: 's2' })
+  assert.equal(foundSecond?.dir, second.dir)
+  assert.equal(foundSecond?.name, '.dsh-blender-lamp-2')
 })
 
 test('listTaskDirs reports markers and snapshot counts without creating anything', async () => {

@@ -15,6 +15,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { sendExecute } from './lib/protocol.js'
+import { createRenderStats } from './lib/renderStats.js'
 import { createSnapshotTracker } from './lib/snapshotPolicy.js'
 import { makeTools } from './lib/tools.js'
 
@@ -68,7 +69,7 @@ Ground rules:
 2. blender_mcp_exec has two modes. Write code uses the default mode: before the call the plugin may write a snapshot (snapshot policy: the first write of a turn, every N writes, and delete-like calls; configurable), then pushes one undo step; use batch to group several snippets into one snapshot/undo step. Inspection code uses readOnly: true: no snapshot, no object diff, no undo step — the plugin still pushes one undo step if the call actually changed the scene. Code that pushes its own undo steps can add more. Tell the user they can press Ctrl+Z to step back; to go back further the user opens a snapshot in Blender — the plugin never restores one by itself.
 3. Write files only under the task directory (.dsh-blender-<task> next to the .blend). OS temp files are allowed for scratch work. Writes outside it are refused with a suggested path; do not retry the same out-of-bounds path. Operator-level file writes are checked; C-level data methods such as image.save_render are not intercepted.
 4. Inspect before editing: call blender_mcp_status / blender_mcp_inspect first, and use blender_mcp_exec with readOnly: true for extra read-only queries.
-5. Do not change render settings on your own. When the user asks for a preview render, use their explicit width/height/samples.
+5. Do not change render settings on your own. When the user asks for a preview render, use their explicit width/height/samples. blender_mcp_render restores the settings and accepts timeoutMs (1 s to 30 min); for a long production render pass a larger timeoutMs or background: true. If a render returns status timeout or running, Blender keeps rendering: do not start another render (other Blender tools will time out too) — call blender_mcp_render_status with the jobId until it reports done or failed, then read the image.
 6. If something looks wrong — a write was blocked unexpectedly, the .blend changed on disk, a tool timed out, the guard self-check failed, the scene looks broken — stop, tell the user exactly what happened with the snapshot path, and end the turn. Never try to roll back or repair the damage yourself; rollback is the user's decision (Ctrl+Z or opening a snapshot).
 7. When unsure about a Blender API, read the English manual linked from status.docs.manualEn with web_fetch.
 8. The blender_* tools from dsh-blender work on background copies of .blend files; use them for batch work and analysis, not for the live session.`
@@ -92,6 +93,8 @@ export function apply(ctx, config) {
   })
   /** @type {Map<string, number>} session id -> undo steps pushed by the plugin (estimate) */
   const undoPushes = new Map()
+  /** Per-session render-speed samples used for a rough "will this fit?" estimate. */
+  const renderStats = createRenderStats()
   /** @type {Set<string>} session ids with a timing-out call that lost its reply */
   const timeoutNotes = new Set()
   /** @type {Map<string, string>} session id -> last known .blend path */
@@ -126,6 +129,7 @@ export function apply(ctx, config) {
       timeoutNotes.delete(session.id)
       knownFilePaths.delete(session.id)
       undoPushes.delete(session.id)
+      renderStats.clearSession(session.id)
       snapshotState.clearSession(session.id)
     },
     { global: true },
@@ -289,6 +293,7 @@ export function apply(ctx, config) {
     noteUndoPush: (sessionId) => {
       undoPushes.set(sessionId, (undoPushes.get(sessionId) ?? 0) + 1)
     },
+    renderStats,
     snapshotState,
     withWriteLock,
   }
@@ -343,5 +348,7 @@ Inspect before editing, write only under the task directory, never save the
 .blend, and send only inspection code with readOnly: true (it skips the
 snapshot and the undo step). Automatic snapshots follow the snapshot policy
 (the first write of a turn, every few writes, and delete-like calls); the user
-opens a snapshot in Blender to go back. Never roll back by yourself: report
-the problem and end the turn.`
+opens a snapshot in Blender to go back. Renders accept a per-call timeoutMs and
+a background start; a render that outlives its call keeps running in Blender,
+so collect it with blender_mcp_render_status instead of rendering again. Never
+roll back by yourself: report the problem and end the turn.`

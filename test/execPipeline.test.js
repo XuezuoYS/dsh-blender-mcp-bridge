@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { ProtocolError } from '../lib/protocol.js'
+import { createRenderStats } from '../lib/renderStats.js'
 import { createSnapshotTracker } from '../lib/snapshotPolicy.js'
 import { makeTools } from '../lib/tools.js'
 
@@ -207,6 +208,7 @@ function makeBridge(setup) {
     withWriteLock: (task) => task(),
     imageSupport: setup.imageSupport ?? (async () => false),
     attachImage: setup.attachImage ?? (async () => null),
+    renderStats: createRenderStats(),
     timeoutWarning: () => setup.timeoutWarning === true,
     noteTimeout() {},
     clearTimeoutNote() {},
@@ -522,6 +524,34 @@ test('render rejects out-of-range dimensions before touching Blender', async () 
   await assert.rejects(() =>
     renderTool.execute({ task: 'lamp', width: 9000, height: 360, samples: 16 }, { agent: { session: { id: 's1' } } }),
   )
+})
+
+test('render forwards the per-call timeout and falls back to the configured one', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sentOptions } = makeBridge({ blendPath, workspaceDir: root })
+  const renderTool = tools.find((tool) => tool.name === 'blender_mcp_render')
+  assert.ok(renderTool)
+  const exec = { agent: { session: { id: 's1' } } }
+
+  await renderTool.execute({ task: 'lamp', timeoutMs: 777000 }, exec)
+  assert.equal(sentOptions.at(-1)?.responseTimeoutMs, 777000)
+
+  await renderTool.execute({ task: 'lamp' }, exec)
+  assert.equal(sentOptions.at(-1)?.responseTimeoutMs, 1000)
+})
+
+test('render rejects a timeout outside the accepted range or combined with background', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sentOptions } = makeBridge({ blendPath, workspaceDir: root })
+  const renderTool = tools.find((tool) => tool.name === 'blender_mcp_render')
+  assert.ok(renderTool)
+  const exec = { agent: { session: { id: 's1' } } }
+  const before = sentOptions.length
+
+  await assert.rejects(renderTool.execute({ task: 'lamp', timeoutMs: 500 }, exec), /timeoutMs/)
+  await assert.rejects(renderTool.execute({ task: 'lamp', timeoutMs: 1800001 }, exec), /timeoutMs/)
+  await assert.rejects(renderTool.execute({ task: 'lamp', background: true, timeoutMs: 1000 }, exec), /omit it with background/)
+  assert.equal(sentOptions.length, before, 'invalid arguments must not reach Blender')
 })
 
 test('exec reports the objects added by the call', async () => {
