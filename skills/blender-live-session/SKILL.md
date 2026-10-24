@@ -21,11 +21,14 @@ guard, not a sandbox.
 
 1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`.
 2. **Choose the `blender_mcp_exec` mode.** Write code uses the default mode:
-   the plugin snapshots before the first write of the turn (when enabled) and
-   pushes one undo step; group snippets with `batch`. Inspection code uses
-   `readOnly: true`: no snapshot, no object diff, no undo step — unless the call
-   actually changed the scene, then one step is pushed anyway. Code that pushes
-   its own undo steps can add more. Tell the user `Ctrl+Z` steps back.
+   the plugin snapshots before the call according to the snapshot policy
+   (default `adaptive`: the first write of a turn, every 10 writes, and
+   delete-like calls), then pushes one undo step; group snippets with `batch`.
+   Inspection code uses `readOnly: true`: no snapshot, no object diff, no undo
+   step — unless the call actually changed the scene, then one step is pushed
+   anyway. Code that pushes its own undo steps can add more. Tell the user
+   `Ctrl+Z` steps back; to go further back the user opens a snapshot in Blender,
+   the plugin never restores one by itself.
 3. **Write only under the task directory** (`.dsh-blender-<task>` next to the
    `.blend`); OS temp files are allowed for scratch work. Blocked writes return
    `suggestedPath`; do not retry the same path.
@@ -71,10 +74,15 @@ calling the model finished.
 
 ### 5. Snapshots and handoff
 
-The plugin snapshots automatically before the first write of a turn. Take an
-extra one with `blender_mcp_snapshot` before a risky step. Files and reports go
-under the task directory. End by telling the user what changed, how to undo it,
-and where the artifacts are.
+The plugin snapshots automatically. `adaptive` (the default) copies before the
+first write of a turn, every 10 writes, and delete-like code; `turn` keeps one
+per turn plus delete-like code; `write` copies before every write.
+`blender_mcp_status` reports how many writes happened since the last snapshot,
+and a snapshot result carries its bytes and duration. Take an extra one with
+`blender_mcp_snapshot` before a risky step; it also resets the automatic
+interval. Files and reports go under the task directory. End by telling the user
+what changed, how to undo it with `Ctrl+Z`, and which snapshot to open to go
+further back — the plugin never restores a snapshot by itself.
 
 ## Tool mapping
 

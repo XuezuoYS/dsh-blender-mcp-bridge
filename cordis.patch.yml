@@ -19,7 +19,9 @@
         snapshot:
           enabled: true
           generations: 3
-          on: turn
+          on: adaptive
+          everyWrites: 10
+          onDestructive: true
           compress: true
           timeoutMs: 120000
         guard:

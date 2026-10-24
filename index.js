@@ -15,6 +15,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { sendExecute } from './lib/protocol.js'
+import { createSnapshotTracker } from './lib/snapshotPolicy.js'
 import { makeTools } from './lib/tools.js'
 
 /** Plugin name; must match `package.json`. */
@@ -37,7 +38,9 @@ export const Config = z.object({
   snapshot: z.object({
     enabled: z.boolean().default(true),
     generations: z.natural().min(1).max(20).default(3),
-    on: z.union(['turn', 'write']).default('turn'),
+    on: z.union(['turn', 'write', 'adaptive']).default('adaptive'),
+    everyWrites: z.natural().min(1).max(100).default(10),
+    onDestructive: z.boolean().default(true),
     compress: z.boolean().default(true),
     timeoutMs: z.natural().min(1000).default(120000),
   }),
@@ -62,7 +65,7 @@ export const SYSTEM_PROMPT = `You can work in the user's currently open Blender 
 
 Ground rules:
 1. The session is live and may contain unsaved work. Never save the .blend, never open another file, never quit Blender, never change preferences. The plugin blocks the obvious calls; the guard is a mistake guard, not a sandbox.
-2. blender_mcp_exec has two modes. Write code uses the default mode: before the first write of a turn it writes a snapshot (when enabled), then pushes one undo step; use batch to group several snippets into one snapshot/undo step. Inspection code uses readOnly: true: no snapshot, no object diff, no undo step — the plugin still pushes one undo step if the call actually changed the scene. Code that pushes its own undo steps can add more. Tell the user they can press Ctrl+Z to step back.
+2. blender_mcp_exec has two modes. Write code uses the default mode: before the call the plugin may write a snapshot (snapshot policy: the first write of a turn, every N writes, and delete-like calls; configurable), then pushes one undo step; use batch to group several snippets into one snapshot/undo step. Inspection code uses readOnly: true: no snapshot, no object diff, no undo step — the plugin still pushes one undo step if the call actually changed the scene. Code that pushes its own undo steps can add more. Tell the user they can press Ctrl+Z to step back; to go back further the user opens a snapshot in Blender — the plugin never restores one by itself.
 3. Write files only under the task directory (.dsh-blender-<task> next to the .blend). OS temp files are allowed for scratch work. Writes outside it are refused with a suggested path; do not retry the same out-of-bounds path. Operator-level file writes are checked; C-level data methods such as image.save_render are not intercepted.
 4. Inspect before editing: call blender_mcp_status / blender_mcp_inspect first, and use blender_mcp_exec with readOnly: true for extra read-only queries.
 5. Do not change render settings on your own. When the user asks for a preview render, use their explicit width/height/samples.
@@ -80,23 +83,19 @@ Ground rules:
 export function apply(ctx, config) {
   /** @type {Map<string, number>} session id -> current turn */
   const turns = new Map()
-  /** @type {Map<string, number>} session id + task dir -> snapshot sequence */
-  const snapshotSeq = new Map()
-  /** @type {Set<string>} session id + task dir -> snapshot already taken this turn */
-  const snapshotTaken = new Set()
+  /** Automatic-snapshot cadence state: session id + task dir -> counters. */
+  const snapshotState = createSnapshotTracker({
+    enabled: config.snapshot.enabled,
+    on: config.snapshot.on,
+    everyWrites: config.snapshot.everyWrites,
+    onDestructive: config.snapshot.onDestructive,
+  })
   /** @type {Map<string, number>} session id -> undo steps pushed by the plugin (estimate) */
   const undoPushes = new Map()
   /** @type {Set<string>} session ids with a timing-out call that lost its reply */
   const timeoutNotes = new Set()
   /** @type {Map<string, string>} session id -> last known .blend path */
   const knownFilePaths = new Map()
-
-  /**
-   * @param {string} sessionId - session id
-   * @param {string} taskDir - absolute task directory
-   * @returns {string} cache key
-   */
-  const stateKey = (sessionId, taskDir) => `${sessionId}\u0000${taskDir}`
 
   ctx.on(
     'session/event',
@@ -110,8 +109,7 @@ export function apply(ctx, config) {
       if (event?.type !== 'turn/start') return
       if (typeof event.data?.turn !== 'number') return
       turns.set(session.id, event.data.turn)
-      const prefix = `${session.id}\u0000`
-      for (const key of snapshotTaken) if (key.startsWith(prefix)) snapshotTaken.delete(key)
+      snapshotState.startTurn(session.id)
     },
     { global: true },
   )
@@ -124,13 +122,11 @@ export function apply(ctx, config) {
      */
     (session) => {
       if (!session || typeof session.id !== 'string') return
-      const prefix = `${session.id}\u0000`
       turns.delete(session.id)
       timeoutNotes.delete(session.id)
       knownFilePaths.delete(session.id)
       undoPushes.delete(session.id)
-      for (const key of snapshotTaken) if (key.startsWith(prefix)) snapshotTaken.delete(key)
-      for (const key of snapshotSeq.keys()) if (key.startsWith(prefix)) snapshotSeq.delete(key)
+      snapshotState.clearSession(session.id)
     },
     { global: true },
   )
@@ -253,6 +249,8 @@ export function apply(ctx, config) {
       enabled: config.snapshot.enabled,
       generations: config.snapshot.generations,
       on: config.snapshot.on,
+      everyWrites: config.snapshot.everyWrites,
+      onDestructive: config.snapshot.onDestructive,
       compress: config.snapshot.compress,
       timeoutMs: config.snapshot.timeoutMs,
     },
@@ -291,21 +289,7 @@ export function apply(ctx, config) {
     noteUndoPush: (sessionId) => {
       undoPushes.set(sessionId, (undoPushes.get(sessionId) ?? 0) + 1)
     },
-    snapshotState: {
-      shouldSnapshot: (sessionId, taskDir) => {
-        if (config.snapshot.on === 'write') return true
-        return !snapshotTaken.has(stateKey(sessionId, taskDir))
-      },
-      markSnapshot: (sessionId, taskDir) => {
-        snapshotTaken.add(stateKey(sessionId, taskDir))
-      },
-      nextSeq: (sessionId, taskDir) => {
-        const key = stateKey(sessionId, taskDir)
-        const next = (snapshotSeq.get(key) ?? 0) + 1
-        snapshotSeq.set(key, next)
-        return next
-      },
-    },
+    snapshotState,
     withWriteLock,
   }
 
@@ -357,5 +341,7 @@ const LIVE_SESSION_SKILL_FALLBACK = `# Blender Live Session
 Work in the user's open Blender session through the blender_mcp_* tools.
 Inspect before editing, write only under the task directory, never save the
 .blend, and send only inspection code with readOnly: true (it skips the
-snapshot and the undo step). Never roll back by yourself: report the problem
-and end the turn.`
+snapshot and the undo step). Automatic snapshots follow the snapshot policy
+(the first write of a turn, every few writes, and delete-like calls); the user
+opens a snapshot in Blender to go back. Never roll back by yourself: report
+the problem and end the turn.`

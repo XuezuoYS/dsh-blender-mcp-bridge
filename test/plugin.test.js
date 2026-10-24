@@ -92,9 +92,14 @@ test('config defaults are applied and invalid values fail at load time', () => {
   assert.equal(CONFIG.port, 9876)
   assert.equal(CONFIG.snapshot.generations, 3)
   assert.equal(CONFIG.snapshot.timeoutMs, 120000)
+  assert.equal(CONFIG.snapshot.on, 'adaptive')
+  assert.equal(CONFIG.snapshot.everyWrites, 10)
+  assert.equal(CONFIG.snapshot.onDestructive, true)
   assert.throws(() => Config({ port: 70000 }))
   assert.throws(() => Config({ snapshot: { generations: 99 } }))
   assert.throws(() => Config({ snapshot: { timeoutMs: 0 } }))
+  assert.throws(() => Config({ snapshot: { on: 'sometimes' } }))
+  assert.throws(() => Config({ snapshot: { everyWrites: 0 } }))
   assert.throws(() => Config({ taskRootMode: 'somewhere' }))
 })
 
@@ -125,14 +130,17 @@ test('apply registers one system prompt section with the no-rollback rule', () =
   assert.match(section.text, /Never save the \.blend/)
   assert.match(section.text, /snapshot/)
   assert.match(section.text, /readOnly/)
+  assert.match(section.text, /snapshot policy/)
+  assert.match(section.text, /the user opens a snapshot/)
 })
 
-test('the exec contract documents readOnly and the undo usage reply', () => {
+test('the exec contract documents readOnly, the snapshot policy and the undo usage reply', () => {
   const { tools } = runApply()
   const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
   assert.ok(execTool)
   assert.match(execTool.description, /readOnly/)
   assert.match(execTool.description, /undoUsage/)
+  assert.match(execTool.description, /snapshot policy/)
   const parameters = /** @type {{ properties?: Record<string, unknown> }} */ (execTool.parameters)
   assert.ok(parameters.properties && Object.hasOwn(parameters.properties, 'readOnly'))
 })

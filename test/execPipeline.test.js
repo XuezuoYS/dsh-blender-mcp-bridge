@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { ProtocolError } from '../lib/protocol.js'
+import { createSnapshotTracker } from '../lib/snapshotPolicy.js'
 import { makeTools } from '../lib/tools.js'
 
 /** @typedef {{ name: string, execute: (args: any, exec: any) => Promise<any>, output?: { render: (args: any, value: any) => any[] } }} ToolLike */
@@ -78,6 +79,9 @@ function pngStub(width, height) {
  * @param {string} setup.blendPath - fake .blend path
  * @param {string} setup.workspaceDir - workspace fallback
  * @param {boolean} [setup.snapshotEnabled] - enable snapshots
+ * @param {'turn'|'write'|'adaptive'} [setup.snapshotOn] - snapshot cadence
+ * @param {number} [setup.everyWrites] - writes between automatic snapshots
+ * @param {boolean} [setup.onDestructive] - extra snapshot before delete-like code
  * @param {(inner: Record<string, unknown>) => Record<string, unknown>} [setup.execResult] - inner envelope override
  * @param {() => Promise<boolean>} [setup.imageSupport] - model image capability
  * @param {(filePath: string, mediaType: string, name: string) => Promise<unknown | null>} [setup.attachImage] - attachment stub
@@ -99,7 +103,12 @@ function makeBridge(setup) {
   /** @type {string[]} */
   const snapshotFiles = []
   let pushes = setup.initialPushes ?? 0
-  let snapshotsTaken = 0
+  const snapshotState = createSnapshotTracker({
+    enabled: setup.snapshotEnabled !== false,
+    on: setup.snapshotOn ?? 'adaptive',
+    everyWrites: setup.everyWrites ?? 10,
+    onDestructive: setup.onDestructive !== false,
+  })
   const send = async (/** @type {string} */ code, /** @type {Record<string, unknown>} */ options = {}) => {
     sent.push(code)
     sentOptions.push(options)
@@ -172,7 +181,15 @@ function makeBridge(setup) {
     captureTimeoutMs: 1000,
     renderTimeoutMs: 1000,
     maxResponseChars: 200000,
-    snapshot: { enabled: setup.snapshotEnabled !== false, generations: 3, on: 'turn', compress: true, timeoutMs: 1000 },
+    snapshot: {
+      enabled: setup.snapshotEnabled !== false,
+      generations: 3,
+      on: setup.snapshotOn ?? 'adaptive',
+      everyWrites: setup.everyWrites ?? 10,
+      onDestructive: setup.onDestructive !== false,
+      compress: true,
+      timeoutMs: 1000,
+    },
     guard: { enabled: true },
     audit: { enabled: true, storeCode: true },
     taskRoot: '',
@@ -182,13 +199,7 @@ function makeBridge(setup) {
     resolveSession: () => ({ sessionId: 's1', workspaceDir: setup.workspaceDir, turn: 3 }),
     knownFilePath: () => setup.knownFilePath ?? '',
     noteFilePath() {},
-    snapshotState: {
-      shouldSnapshot: () => setup.snapshotEnabled !== false && snapshotsTaken === 0,
-      markSnapshot() {
-        snapshotsTaken += 1
-      },
-      nextSeq: () => 1,
-    },
+    snapshotState,
     undoPushCount: () => pushes,
     noteUndoPush() {
       pushes += 1
@@ -238,6 +249,8 @@ test('exec writes a snapshot, runs the guarded payload, and audits the call', as
   assert.equal(audit.status, 'ok')
   assert.equal(audit.task, 'lamp')
   assert.match(audit.snapshot, /3-000001\.blend$/)
+  assert.equal(audit.snapshotReason, 'turn')
+  assert.equal(audit.writesSinceSnapshot, 1)
 })
 
 test('L1 refusal never sends the user code to Blender', async () => {
@@ -288,11 +301,148 @@ test('snapshot can be disabled and the exec still runs', async () => {
   const { blendPath, root } = await makeProject()
   const { tools, snapshotFiles } = makeBridge({ blendPath, workspaceDir: root, snapshotEnabled: false })
   const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  const statusTool = tools.find((tool) => tool.name === 'blender_mcp_status')
   assert.ok(execTool)
+  assert.ok(statusTool)
 
   const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
   assert.equal(value.status, 'ok')
   assert.equal(snapshotFiles.length, 0)
+
+  const status = await statusTool.execute({}, { agent: { session: { id: 's1' } } })
+  assert.equal(status.snapshotPolicy.enabled, false)
+  assert.ok(String(statusTool.output?.render({}, status)[0].text).includes('Snapshot policy: disabled'))
+})
+
+test('adaptive snapshots appear at the turn start and every N writes', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root, everyWrites: 4 })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  /** @type {string[]} */
+  const reasons = []
+  /** @type {string[]} */
+  const names = []
+  for (let index = 0; index < 10; index += 1) {
+    /** @type {Record<string, any>} */
+    const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+    assert.equal(value.status, 'ok')
+    reasons.push(value.snapshot === undefined ? '' : String(value.snapshot.reason))
+    if (value.snapshot !== undefined) names.push(String(value.snapshot.name))
+  }
+
+  assert.equal(bridge.snapshotFiles.length, 3)
+  assert.deepEqual(reasons, ['turn', '', '', '', 'everyWrites', '', '', '', 'everyWrites', ''])
+  assert.deepEqual(names, ['3-000001.blend', '3-000002.blend', '3-000003.blend'])
+})
+
+test('a 30-write turn produces several automatic snapshots with the defaults', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool?.output)
+
+  /** @type {number[]} */
+  const snapshotCalls = []
+  /** @type {string} */
+  let snapshotText = ''
+  for (let index = 0; index < 30; index += 1) {
+    const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+    if (value.snapshot !== undefined) {
+      snapshotCalls.push(index + 1)
+      snapshotText = String(execTool.output.render({}, value)[0].text)
+    }
+  }
+
+  assert.deepEqual(snapshotCalls, [1, 11, 21])
+  assert.equal(bridge.snapshotFiles.length, 3)
+  assert.ok(snapshotText.includes('never restores a snapshot'))
+  assert.ok(snapshotText.includes('3-000003.blend'))
+})
+
+test('a delete-like call takes an extra snapshot before it runs', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(bridge.snapshotFiles.length, 1)
+
+  const removed = await execTool.execute(
+    { code: 'bpy.data.objects.remove(bpy.data.objects[0])', task: 'lamp' },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.equal(removed.status, 'ok')
+  assert.equal(removed.snapshot?.reason, 'destructive')
+  assert.equal(bridge.snapshotFiles.length, 2)
+
+  const first = await execTool.execute(
+    { code: 'bpy.data.objects.remove(bpy.data.objects[0])', task: 'lamp', readOnly: true },
+    { agent: { session: { id: 's1' } } },
+  )
+  assert.equal(first.snapshot, undefined)
+  assert.equal(bridge.snapshotFiles.length, 2)
+})
+
+test('turn mode warns once when the turn runs past everyWrites', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root, snapshotOn: 'turn', everyWrites: 3 })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  /** @type {string[]} */
+  const warnings = []
+  for (let index = 0; index < 5; index += 1) {
+    const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+    warnings.push((Array.isArray(value.warnings) ? value.warnings : []).join('\n'))
+  }
+
+  assert.equal(bridge.snapshotFiles.length, 1)
+  assert.equal(warnings.filter((text) => text.includes('Long turn')).length, 1)
+  assert.ok(warnings[2].includes('3 writes since the last automatic snapshot'))
+})
+
+test('an explicit snapshot covers the turn and resets the interval', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root, everyWrites: 1 })
+  const snapshotTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_snapshot')
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(snapshotTool)
+  assert.ok(execTool)
+
+  const explicit = await snapshotTool.execute({ task: 'lamp', label: 'checkpoint' }, { agent: { session: { id: 's1' } } })
+  assert.equal(explicit.status, 'ok')
+  assert.equal(explicit.name, '3-000001.blend')
+  assert.equal(explicit.writesSincePrevious, 0)
+  assert.equal(explicit.tookMs >= 0, true)
+
+  const value = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  assert.equal(value.snapshot, undefined)
+  assert.equal(bridge.snapshotFiles.length, 1)
+})
+
+test('status reports the snapshot policy and the gap since the last snapshot', async () => {
+  const { blendPath, root } = await makeProject()
+  const bridge = makeBridge({ blendPath, workspaceDir: root, everyWrites: 5 })
+  const execTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_exec')
+  const statusTool = bridge.tools.find((tool) => tool.name === 'blender_mcp_status')
+  assert.ok(execTool)
+  assert.ok(statusTool?.output)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
+
+  const value = await statusTool.execute({}, { agent: { session: { id: 's1' } } })
+  assert.equal(value.snapshotPolicy.on, 'adaptive')
+  assert.equal(value.snapshotPolicy.everyWrites, 5)
+  assert.equal(value.snapshotPolicy.onDestructive, true)
+  assert.equal(value.taskDirs[0].writesSinceSnapshot, 2)
+
+  const text = String(statusTool.output.render({}, value)[0].text)
+  assert.ok(text.includes('Snapshot policy: adaptive;'))
+  assert.ok(text.includes('2 writes since 3-000001.blend'))
 })
 
 test('capture returns an image block when the model supports images', async () => {
