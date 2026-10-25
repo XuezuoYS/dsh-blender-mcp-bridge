@@ -1,0 +1,38 @@
+dsh-blender-mcp-bridge is released under the MIT License; see LICENSE.
+
+This package includes an adapted copy of the create-3d-model Agent Skill from:
+
+  Upstream project: https://github.com/CheshireJCat/create-3d-model-skill
+  License: MIT
+  Copyright (c) 2026 CheshireJCat
+
+That skill in turn preserves and adapts modules from RobLe3/cc-blender-skill:
+
+  Upstream project: https://github.com/RobLe3/cc-blender-skill
+  License: MIT
+  Copyright (c) 2026 RobLe3
+
+The 26 helper scripts under helpers/ and the 6 reference files under
+skills/blender-live-session/references/ are unmodified copies.
+skills/blender-live-session/SKILL.md is an adaptation; its header lists the
+changes.
+
+The full MIT texts are kept in:
+
+  helpers/LICENSES/
+  skills/blender-live-session/LICENSES/
+
+Compatibility reference, not a source of files:
+
+  https://github.com/CheshireJCat/blender  (dsh-blender, MIT,
+  Copyright (c) 2026 nekos)
+
+  Only its tool naming and helper catalog fields were used as a reference; no
+  files from dsh-blender are copied here.
+
+DeepSeek Harness is a separate project by DeepSeek AI and is licensed under
+MIT. Blender is a trademark of the Blender Foundation; this plugin is not an
+official DeepSeek AI or Blender Foundation product.
+
+This is a self-curated subset; the upstream authors did not review or endorse
+it.

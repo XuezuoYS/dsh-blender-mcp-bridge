@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 原始技能 | [RobLe3/cc-blender-skill](https://github.com/RobLe3/cc-blender-skill) | 1.3.0，commit `11016c9a5847897491dde935c346571bd7548e3d` | MIT，Copyright (c) 2026 RobLe3 |
 | 直接来源 | [CheshireJCat/create-3d-model-skill](https://github.com/CheshireJCat/create-3d-model-skill) | `main`，`skills/create-3d-model/` | MIT，Copyright (c) 2026 CheshireJCat |
-| 兼容参考 | [CheshireJCat/blender](https://github.com/CheshireJCat/blender)（`dsh-blender`） | v0.2.3 | MIT；仅参考其工具映射和 helper 字段，不复制文件 |
+| 兼容参考 | [CheshireJCat/blender](https://github.com/CheshireJCat/blender)（`dsh-blender`） | v0.2.4 | MIT；仅参考其工具映射和 helper 字段，不复制文件 |
 
 本项目实际取用的是 `create-3d-model-skill` 的 `skills/create-3d-model/`。该目录自带 `LICENSE`（CheshireJCat）和 `UPSTREAM_LICENSE`（RobLe3）；`references/upstream.md` 记录了上游版本和 commit。
 
@@ -118,11 +118,11 @@ MIT 要求版权声明和许可全文随副本走，不能只留一个链接。
 
 ### README
 
-根目录 `README.md` 只保留简短提示，指向本文档；详细授权说明不在 README 里重复。
+根目录 `README.md` 的「来源与许可」保留一段摘要，指向 `NOTICE` 和本文；详细清单不在 README 里重复。
 
 ### 版本与更新
 
-引用时记录 `create-3d-model-skill` 的 commit、上游 `cc-blender-skill` 1.3.0 和 commit `11016c9a...`。上游升级时先做 diff，只更新实际复制的文件，再同步本文档的版本信息；不要用新版本直接覆盖改写内容。
+引用时记录 `create-3d-model-skill` 的 commit、上游 `cc-blender-skill` 1.3.0 和 commit `11016c9a...`。上游升级时先做 diff，只更新实际复制的文件，再同步 `NOTICE`、`helpers/README.md`、`skills/blender-live-session/references/NOTICE.md` 和本文档里的版本信息；不要用新版本直接覆盖改写内容。
 
 ## 许可全文
 

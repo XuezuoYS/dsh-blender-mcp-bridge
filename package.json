@@ -81,8 +81,10 @@
     "skills",
     "diagnostics",
     "test",
+    "docs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "license": "MIT",
   "devDependencies": {
