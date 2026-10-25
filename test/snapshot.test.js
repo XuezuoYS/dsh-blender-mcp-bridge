@@ -7,20 +7,66 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { createSnapshot, planRotation, snapshotFileName, SnapshotError } from '../lib/snapshot.js'
+import {
+  createSnapshot,
+  localStamp,
+  planRotation,
+  snapshotFileName,
+  snapshotLabel,
+  snapshotSessionKey,
+  SnapshotError,
+} from '../lib/snapshot.js'
 import { ensureTaskDir } from '../lib/taskDir.js'
 
-test('snapshot names sort by generation', () => {
-  assert.equal(snapshotFileName(3, 7), '3-000007.blend')
-  assert.ok(snapshotFileName(3, 10) > snapshotFileName(3, 9))
+/** Fixed moment so snapshot names are reproducible. */
+const NOW = new Date(2026, 9, 25, 10, 54, 2)
+
+/**
+ * Snapshot name with the test defaults.
+ *
+ * @param {number} turn - turn number
+ * @param {number} [seq] - sequence within the turn
+ * @param {string} [label] - model label
+ * @returns {string} snapshot file name
+ */
+function snapshotName(turn, seq = 1, label = '') {
+  return snapshotFileName({ turn, seq, label, reason: 'manual', sessionId: 's1', now: NOW })
+}
+
+test('snapshot names carry label, local time and a short session key', () => {
+  assert.equal(localStamp(NOW), '261025-105402')
+  assert.equal(
+    snapshotFileName({ turn: 1, seq: 2, label: 'final', reason: 'manual', sessionId: 's1', now: NOW }),
+    '1-000002_final_261025-105402_s1.blend',
+  )
+  assert.ok(snapshotName(3, 10) > snapshotName(3, 9))
+})
+
+test('a missing label falls back to manual or auto-<reason>', () => {
+  assert.equal(snapshotName(1, 1), '1-000001_manual_261025-105402_s1.blend')
+  assert.equal(
+    snapshotFileName({ turn: 1, seq: 1, label: '   ', reason: 'everyWrites', sessionId: 's1', now: NOW }),
+    '1-000001_auto-everywrites_261025-105402_s1.blend',
+  )
+  assert.equal(snapshotLabel('final approved!', 'manual'), 'final-approved')
+  assert.equal(snapshotLabel('', 'destructive'), 'auto-destructive')
+  assert.equal(snapshotLabel('x'.repeat(80), 'manual'), 'x'.repeat(32))
+  assert.equal(snapshotLabel('../../etc/passwd', 'manual'), 'etc-passwd')
+})
+
+test('the session segment is short, safe and never empty', () => {
+  assert.equal(snapshotSessionKey('0f8c1e2a-1234-5678-9abc-def012345678'), '0f8c1e2a')
+  assert.equal(snapshotSessionKey('unknown-session'), 'unknown')
+  assert.equal(snapshotSessionKey('has space/slash'), 'has-spac')
+  assert.equal(snapshotSessionKey(''), 'session')
 })
 
 test('rotation keeps the newest generations after turn 10', () => {
-  const names = [1, 2, 9, 10, 11].map((turn) => snapshotFileName(turn, 1))
+  const names = [1, 2, 9, 10, 11].map((turn) => snapshotName(turn))
   // Feed them unsorted on purpose: rotation must sort by (turn, seq) itself.
   assert.deepEqual(
     planRotation([...names].reverse(), 3),
-    [1, 2, 9].map((turn) => snapshotFileName(turn, 1)),
+    [1, 2, 9].map((turn) => snapshotName(turn)),
   )
   assert.deepEqual(planRotation(['1-001.blend', '10-001.blend', '2-001.blend', '9-001.blend'], 3), [
     '1-001.blend',
@@ -30,14 +76,20 @@ test('rotation keeps the newest generations after turn 10', () => {
 
 test('rotation writes first and drops the oldest generation', () => {
   assert.deepEqual(planRotation([], 3), [])
-  assert.deepEqual(planRotation(['1-001.blend'], 3), [])
-  assert.deepEqual(planRotation(['1-001.blend', '1-002.blend'], 3), [])
-  assert.deepEqual(planRotation(['1-001.blend', '1-002.blend', '1-003.blend'], 3), ['1-001.blend'])
-  assert.deepEqual(planRotation(['1-001.blend', '1-002.blend', '1-003.blend', '1-004.blend'], 2), [
-    '1-001.blend',
-    '1-002.blend',
-    '1-003.blend',
-  ])
+  assert.deepEqual(planRotation([snapshotName(1, 1)], 3), [])
+  assert.deepEqual(planRotation([snapshotName(1, 1), snapshotName(1, 2)], 3), [])
+  assert.deepEqual(planRotation([snapshotName(1, 1), snapshotName(1, 2), snapshotName(1, 3)], 3), [snapshotName(1, 1)])
+  assert.deepEqual(
+    planRotation([snapshotName(1, 1), snapshotName(1, 2), snapshotName(1, 3), snapshotName(1, 4)], 2),
+    [snapshotName(1, 1), snapshotName(1, 2), snapshotName(1, 3)],
+  )
+})
+
+test('rotation ignores the label when ordering generations', () => {
+  const oldest = snapshotName(1, 1, 'zzz')
+  const middle = snapshotName(1, 2, 'aaa')
+  const newest = snapshotName(1, 3, 'mmm')
+  assert.deepEqual(planRotation([newest, oldest, middle], 3), [oldest])
 })
 
 /**
@@ -57,7 +109,7 @@ function fakeSnapshotSender() {
   }
 }
 
-test('createSnapshot writes the file and rotates after success', async () => {
+test('createSnapshot writes the labelled file and rotates after success', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-snap-'))
   const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
   const snapshotsDir = path.join(task.dir, 'snapshots')
@@ -67,13 +119,17 @@ test('createSnapshot writes the file and rotates after success', async () => {
     taskDir: task.dir,
     turn: 1,
     seq: 4,
+    label: 'final',
+    reason: 'manual',
+    sessionId: 's1',
+    now: NOW,
     send: fakeSnapshotSender(),
     compress: true,
     generations: 3,
     timeoutMs: 1000,
   })
 
-  assert.equal(result.name, '1-000004.blend')
+  assert.equal(result.name, '1-000004_final_261025-105402_s1.blend')
   assert.equal(result.bytes, 5)
   assert.deepEqual(
     result.removed.map((entry) => path.basename(entry)),
@@ -94,14 +150,43 @@ test('createSnapshot rotates the oldest turn, not the lexically first name', asy
     taskDir: task.dir,
     turn: 11,
     seq: 11,
+    label: 'bench',
+    reason: 'manual',
+    sessionId: 's1',
+    now: NOW,
     send: fakeSnapshotSender(),
     compress: true,
     generations: 3,
     timeoutMs: 1000,
   })
 
-  assert.equal(result.name, '11-000011.blend')
+  assert.equal(result.name, '11-000011_bench_261025-105402_s1.blend')
   assert.deepEqual(result.removed.map((entry) => path.basename(entry)), ['8-008.blend'])
+})
+
+test('createSnapshot skips a sequence this turn already used', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-snap-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  const snapshotsDir = path.join(task.dir, 'snapshots')
+  // A previous plugin process wrote generation 4, then restarted with seq reset.
+  await writeFile(path.join(snapshotsDir, '1-000004_older_261024-090000_aaaaaaa1.blend'), 'old')
+
+  const result = await createSnapshot({
+    taskDir: task.dir,
+    turn: 1,
+    seq: 4,
+    label: 'after-restart',
+    reason: 'manual',
+    sessionId: 's1',
+    now: NOW,
+    send: fakeSnapshotSender(),
+    compress: true,
+    generations: 3,
+    timeoutMs: 1000,
+  })
+
+  assert.equal(result.name, '1-000005_after-restart_261025-105402_s1.blend')
+  assert.deepEqual(result.removed, [])
 })
 
 test('a snapshot that changes the open file path is refused', async () => {

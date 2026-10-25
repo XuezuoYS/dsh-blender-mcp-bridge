@@ -331,15 +331,15 @@ test('exec writes a snapshot, runs the guarded payload, and audits the call', as
   )
 
   assert.equal(value.status, 'ok')
-  assert.equal(value.snapshot?.name, '3-000001.blend')
+  assert.match(String(value.snapshot?.name), /^3-000001_auto-turn_\d{6}-\d{6}_s1\.blend$/)
   assert.equal(snapshotFiles.length, 1)
-  await access(path.join(blendDir, '.dsh-blender-lamp', 'snapshots', '3-000001.blend'))
+  await access(snapshotFiles[0])
   assert.ok(sent.some((code) => code.includes('_dsh_install(')))
   const auditLines = (await readFile(path.join(blendDir, '.dsh-blender-lamp', 'audit.jsonl'), 'utf8')).trim().split('\n')
   const audit = JSON.parse(auditLines[0])
   assert.equal(audit.status, 'ok')
   assert.equal(audit.task, 'lamp')
-  assert.match(audit.snapshot, /3-000001\.blend$/)
+  assert.match(audit.snapshot, /3-000001_auto-turn_\d{6}-\d{6}_s1\.blend$/)
   assert.equal(audit.snapshotReason, 'turn')
   assert.equal(audit.writesSinceSnapshot, 1)
 })
@@ -602,7 +602,11 @@ test('adaptive snapshots appear at the turn start and every N writes', async () 
 
   assert.equal(bridge.snapshotFiles.length, 3)
   assert.deepEqual(reasons, ['turn', '', '', '', 'everyWrites', '', '', '', 'everyWrites', ''])
-  assert.deepEqual(names, ['3-000001.blend', '3-000002.blend', '3-000003.blend'])
+  assert.deepEqual(names.map((name) => name.slice(0, 8)), ['3-000001', '3-000002', '3-000003'])
+  assert.deepEqual(
+    names.map((name) => String(/^3-\d{6}_(auto-[a-z]+)_\d{6}-\d{6}_s1\.blend$/.exec(name)?.[1] ?? '')),
+    ['auto-turn', 'auto-everywrites', 'auto-everywrites'],
+  )
 })
 
 test('a 30-write turn produces several automatic snapshots with the defaults', async () => {
@@ -626,7 +630,7 @@ test('a 30-write turn produces several automatic snapshots with the defaults', a
   assert.deepEqual(snapshotCalls, [1, 11, 21])
   assert.equal(bridge.snapshotFiles.length, 3)
   assert.ok(snapshotText.includes('never restores a snapshot'))
-  assert.ok(snapshotText.includes('3-000003.blend'))
+  assert.match(snapshotText, /3-000003_auto-everywrites_\d{6}-\d{6}_s1\.blend/)
 })
 
 test('a delete-like call takes an extra snapshot before it runs', async () => {
@@ -682,7 +686,7 @@ test('an explicit snapshot covers the turn and resets the interval', async () =>
 
   const explicit = await snapshotTool.execute({ task: 'lamp', label: 'checkpoint' }, { agent: { session: { id: 's1' } } })
   assert.equal(explicit.status, 'ok')
-  assert.equal(explicit.name, '3-000001.blend')
+  assert.match(String(explicit.name), /^3-000001_checkpoint_\d{6}-\d{6}_s1\.blend$/)
   assert.equal(explicit.writesSincePrevious, 0)
   assert.equal(explicit.tookMs >= 0, true)
 
@@ -710,7 +714,7 @@ test('status reports the snapshot policy and the gap since the last snapshot', a
 
   const text = String(statusTool.output.render({}, value)[0].text)
   assert.ok(text.includes('Snapshot policy: adaptive;'))
-  assert.ok(text.includes('2 writes since 3-000001.blend'))
+  assert.match(text, /2 writes since 3-000001_auto-turn_\d{6}-\d{6}_s1\.blend/)
 })
 
 test('capture returns an image block when the model supports images', async () => {
@@ -884,12 +888,12 @@ test('status reports the live facts and lists task directories', async () => {
   assert.equal(value.taskDirs[0].name, '.dsh-blender-lamp')
   assert.equal(value.taskDirs[0].snapshots, 1)
   assert.equal(value.taskDirs[0].snapshotDetails.length, 1)
-  assert.equal(value.taskDirs[0].snapshotDetails[0].name, '3-000001.blend')
+  assert.match(String(value.taskDirs[0].snapshotDetails[0].name), /^3-000001_auto-turn_\d{6}-\d{6}_s1\.blend$/)
   assert.equal(value.taskDirs[0].snapshotDetails[0].bytes, 5)
   assert.match(value.taskDirs[0].snapshotDetails[0].modifiedAt, /^\d{4}-\d{2}-\d{2}T/)
   const blocks = statusTool.output.render({}, value)
   assert.ok(String(blocks[0].text).includes('docs.blender.org'))
-  assert.ok(String(blocks[0].text).includes('3-000001.blend (5 bytes'))
+  assert.match(String(blocks[0].text), /3-000001_auto-turn_\d{6}-\d{6}_s1\.blend \(5 bytes/)
 })
 
 test('status warns when autosave moves the .blend path', async () => {
@@ -1014,7 +1018,7 @@ test('a read-only exec does not use the turn snapshot slot', async () => {
   assert.equal(bridge.snapshotFiles.length, 0)
 
   const writeValue = await execTool.execute({ code: 'result = {}', task: 'lamp' }, { agent: { session: { id: 's1' } } })
-  assert.equal(writeValue.snapshot?.name, '3-000001.blend')
+  assert.match(String(writeValue.snapshot?.name), /^3-000001_auto-turn_\d{6}-\d{6}_s1\.blend$/)
   assert.equal(bridge.snapshotFiles.length, 1)
 })
 

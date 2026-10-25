@@ -6,7 +6,11 @@
 
 - 用 `save_as_mainfile(copy=True)` 把当前会话写成任务目录 `snapshots/` 下的一份副本；
 - 不改当前文件路径，不清脏标记，不碰用户的 `.blend`；
-- 文件名 `<轮次>-<序号>.blend`，只保留最新 `generations` 份（默认 3），先写新文件再删旧文件；
+- 文件名 `<轮次>-<序号>_<label>_<时间>_<会话前8位>.blend`，例如 `1-000002_final_261025-105402_a1b2c3d4.blend`：
+  - `label` 是模型给的名字（空格、标点会被换成 `-`）；显式快照没给 label 时是 `manual`，自动快照是 `auto-<原因>`（`auto-turn`、`auto-everywrites`、`auto-destructive`、`auto-write`）；
+  - 时间是**本地时间** `YYMMDD-HHMMSS`，给人看，不参与排序；
+  - 会话取前 8 位，方便分清是哪个会话留下的；
+- 排序和轮转只认最前面的 `<轮次>-<序号>`，所以 label 或时间怎么变都不会影响代次；只保留最新 `generations` 份（默认 3），先写新文件再删旧文件；
 - 写入用插件的受信任通道，不经过用户代码的写路径。
 
 ## 2. 为什么要有自动节奏
@@ -71,6 +75,7 @@ snapshot:
 
 - `exec` 结果里的 `snapshot`：路径、字节数、耗时、触发原因（`turn` / `everyWrites` / `destructive` / `write`），以及"回退要用户自己打开快照"的说明；
 - `blender_mcp_status`：`snapshotPolicy` 和每个任务目录的 `writesSinceSnapshot`；
+- `blender_mcp_status` 的快照列表直接列出文件名，label 就在名字里，不用再记轮次和序号的对应关系；
 - `turn` 模式跑成长任务时，本轮会给一次提醒；
 - 显式快照结果：文件名、字节数、耗时、离上次快照的写入数、被轮换掉的旧文件。
 

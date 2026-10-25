@@ -14,6 +14,7 @@ import {
   listSnapshots,
   listTaskDirs,
   MARKER_FILE,
+  parseSnapshotName,
   resolveTaskRoot,
   slugifyTaskName,
   taskDirName,
@@ -116,6 +117,31 @@ test('listSnapshots orders by numeric generation', async () => {
     await writeFile(path.join(task.dir, 'snapshots', name), 'x')
   }
   assert.deepEqual(await listSnapshots(task.dir), ['2-001.blend', '9-001.blend', '10-001.blend'])
+})
+
+test('parseSnapshotName reads both snapshot name shapes', () => {
+  assert.deepEqual(parseSnapshotName('1-000002_final_261025-105402_s1.blend'), { turn: 1, seq: 2 })
+  assert.deepEqual(parseSnapshotName('10-000010.blend'), { turn: 10, seq: 10 })
+  assert.equal(parseSnapshotName('render-20260101000000000.png'), null)
+  assert.equal(parseSnapshotName('notes.blend'), null)
+})
+
+test('snapshot names sort by the numeric prefix, not the label or stamp', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-task-'))
+  const task = await ensureTaskDir({ root, task: 'lamp', sessionId: 's1' })
+  const names = [
+    '2-000001_zzz_261025-105402_s1.blend',
+    '1-000002_aaa_261024-090000_s2.blend',
+    '1-000001_manual_261025-105402_s1.blend',
+    '1-000001.blend',
+  ]
+  for (const name of names) await writeFile(path.join(task.dir, 'snapshots', name), 'x')
+  assert.deepEqual(await listSnapshots(task.dir), [
+    '1-000001.blend',
+    '1-000001_manual_261025-105402_s1.blend',
+    '1-000002_aaa_261024-090000_s2.blend',
+    '2-000001_zzz_261025-105402_s1.blend',
+  ])
 })
 
 test('isInsideTask resolves a directory link before deciding', async (t) => {
