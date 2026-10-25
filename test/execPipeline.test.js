@@ -61,6 +61,33 @@ function handshakeEnvelope(blendPath, background = false) {
         samples: 64,
         fileFormat: 'PNG',
       },
+      performance: {
+        engine: 'CYCLES',
+        threads: { mode: 'AUTO', count: 0 },
+        colorManagement: {
+          displayDevice: 'sRGB',
+          viewTransform: 'AgX',
+          look: 'None',
+          exposure: 0,
+          gamma: 1,
+        },
+        cycles: {
+          deviceType: 'OPTIX',
+          deviceCount: 2,
+          devices: [
+            { name: 'NVIDIA GeForce RTX 4090', type: 'OPTIX', use: true },
+            { name: 'AMD Ryzen 9 7950X', type: 'CPU', use: false },
+          ],
+          devicesTruncated: false,
+          samples: 128,
+          previewSamples: 8,
+          adaptiveSampling: true,
+          adaptiveThreshold: 0.01,
+          denoising: true,
+          denoiser: 'OPENIMAGEDENOISE',
+        },
+        eevee: { renderSamples: 64, viewportSamples: 16 },
+      },
     },
   }
 }
@@ -534,6 +561,25 @@ test('snapshot can be disabled and the exec still runs', async () => {
   const status = await statusTool.execute({}, { agent: { session: { id: 's1' } } })
   assert.equal(status.snapshotPolicy.enabled, false)
   assert.ok(String(statusTool.output?.render({}, status)[0].text).includes('Snapshot policy: disabled'))
+})
+
+test('status renders the read-only performance block', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root })
+  const statusTool = tools.find((tool) => tool.name === 'blender_mcp_status')
+  assert.ok(statusTool)
+
+  const status = await statusTool.execute({}, { agent: { session: { id: 's1' } } })
+  assert.equal(status.connected, true)
+  assert.equal(status.performance.cycles.deviceType, 'OPTIX')
+  assert.equal(status.performance.cycles.devices.length, 2)
+  assert.equal(status.performance.eevee.renderSamples, 64)
+
+  const text = String(statusTool.output?.render({}, status)[0].text)
+  assert.match(text, /Render performance: engine CYCLES; threads AUTO; Cycles compute OPTIX/)
+  assert.match(text, /Cycles devices \(2\): NVIDIA GeForce RTX 4090 \[OPTIX, used\], AMD Ryzen 9 7950X \[CPU, idle\]\./)
+  assert.match(text, /Color management: display sRGB; view AgX; look None\./)
+  assert.match(text, /EEVEE samples: 64 \(viewport 16\)\./)
 })
 
 test('adaptive snapshots appear at the turn start and every N writes', async () => {

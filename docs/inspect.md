@@ -56,7 +56,7 @@
 
 `summary` 的 `typeCounts` 统计的是过滤后的对象集合，`totalObjects` 永远是全场景对象数；集合聚合永远是全场景结构，不随对象过滤变化。
 
-渲染设置不在 `inspect` 里：用 `blender_mcp_status`（它返回引擎、分辨率、采样、格式）。
+渲染设置不在 `inspect` 里：用 `blender_mcp_status`（它返回引擎、分辨率、采样、格式，以及 `performance` 里的设备、降噪、色彩管理、线程）。
 
 ## 5. 分页与截断
 

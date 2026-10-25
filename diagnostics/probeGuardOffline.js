@@ -37,6 +37,7 @@ bpy.data.libraries = types.SimpleNamespace(write=lambda *a, **k: None)
 prefs = types.SimpleNamespace(
     edit=types.SimpleNamespace(undo_steps=32, undo_memory_limit=0, use_global_undo=True),
     filepaths=types.SimpleNamespace(use_auto_save_temporary_files=True, auto_save_time=10, save_version=2),
+    addons={'cycles': types.SimpleNamespace(preferences=types.SimpleNamespace(compute_device_type='NONE'))},
 )
 bpy.context = types.SimpleNamespace(scene=types.SimpleNamespace(render=types.SimpleNamespace(filepath='')), preferences=prefs)
 sys.modules['bpy'] = bpy
@@ -57,6 +58,7 @@ result['driverState'] = {
     'openHooked': bool(getattr(builtins.open, '__dsh_guard__', False)),
     'hooks': len(getattr(state_mod, 'hooks', [])) if state_mod is not None else 0,
     'installedRoot': getattr(state_mod, 'installed_root', None) if state_mod is not None else None,
+    'cyclesDeviceType': str(bpy.context.preferences.addons['cycles'].preferences.compute_device_type),
 }
 with open(out_path, 'w', encoding='utf-8') as fh:
     json.dump(result, fh)
@@ -247,6 +249,17 @@ io.FileIO(${JSON.stringify(outsideWrite)}, 'w')`,
     check: (result) => {
       const changed = result.guard?.preferencesChanged ?? []
       if (!Array.isArray(changed) || !changed.includes('edit.undo_steps')) return ['expected preferencesChanged']
+      if ((result.guard?.blocked ?? []).length === 0) return ['expected blocked evidence']
+      return []
+    },
+  },
+  {
+    name: 'cycles device preference writes are restored and reported',
+    code: "bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'",
+    check: (result) => {
+      const changed = result.guard?.preferencesChanged ?? []
+      if (!Array.isArray(changed) || !changed.includes('cycles.compute_device_type')) return ['expected preferencesChanged']
+      if (result.driverState?.cyclesDeviceType !== 'NONE') return ['device type was not restored']
       if ((result.guard?.blocked ?? []).length === 0) return ['expected blocked evidence']
       return []
     },

@@ -14,13 +14,18 @@ This is a self-curated adaptation, not an official subset.
 Work inside the user's **currently open Blender session** through the
 `blender_mcp_*` tools. The session may contain unsaved work: never save the
 `.blend`, never open another file, never quit Blender, never change
-preferences. The plugin blocks the obvious calls; the guard is a mistake
-guard, not a sandbox.
+preferences. Reading a few whitelisted preference fields (undo limits, Cycles
+compute device type) is allowed, but device, denoise, color management and
+thread facts belong in the `performance` block of `blender_mcp_status`. The
+plugin blocks the obvious calls; the guard is a mistake guard, not a sandbox.
 
 ## Ground rules
 
 1. **Inspect first**: `blender_mcp_status`, then `blender_mcp_inspect`. The
-   reply is a query, not a dump: pass `scope` (`summary`, `objects`,
+   status reply carries the render settings and a read-only `performance` block
+   (engine, Cycles compute device type and devices, denoise, samples, color
+   management, threads); use it instead of reading `bpy.context.preferences`.
+   The inspect reply is a query, not a dump: pass `scope` (`summary`, `objects`,
    `collections`, `materials`, `lights`, `cameras`), filter with `name` (glob),
    `type`, `collection`, add fields with `include`, and page with `limit`
    (1-200) and `offset`; take `paging.nextOffset` for the next page. The bare

@@ -89,6 +89,11 @@ bpy.data = types.SimpleNamespace(
 prefs = types.SimpleNamespace(
     edit=types.SimpleNamespace(undo_steps=32, undo_memory_limit=0, use_global_undo=True),
     filepaths=types.SimpleNamespace(use_auto_save_temporary_files=True, auto_save_time=10, save_version=2),
+    addons={
+        'cycles': types.SimpleNamespace(
+            preferences=types.SimpleNamespace(compute_device_type='NONE', devices=[]),
+        ),
+    },
 )
 scene = types.SimpleNamespace(
     name='Scene',
@@ -233,4 +238,56 @@ test('a read-only payload with a broken change check still pushes undo', async (
   assert.equal(value.undo.pushed, true)
   assert.equal(value.undo.reason, 'read-only-unverified')
   assert.match(String(value.undo.checkError), /AttributeError/)
+})
+
+test('reading the whitelisted Cycles device preference is read-only', async (t) => {
+  const python = await findTestPython()
+  if (python === null) {
+    t.skip('no Python interpreter found')
+    return
+  }
+  const workDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-readonly-'))
+  await writeFile(path.join(workDir, 'driver.py'), DRIVER, 'utf8')
+
+  const value = await runPayload(
+    python,
+    workDir,
+    "device = bpy.context.preferences.addons['cycles'].preferences.compute_device_type\n" +
+      'result = {"device": device}',
+    { readOnly: true },
+  )
+  assert.equal(value.status, 'ok')
+  assert.equal(value.result.device, 'NONE')
+  assert.equal(value.undo.pushed, false)
+  assert.equal(value.undo.reason, 'read-only')
+  assert.deepEqual(value.guard.preferencesChanged, [])
+})
+
+test('a changed Cycles device preference is restored and reported', async (t) => {
+  const python = await findTestPython()
+  if (python === null) {
+    t.skip('no Python interpreter found')
+    return
+  }
+  const workDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-readonly-'))
+  await writeFile(path.join(workDir, 'driver.py'), DRIVER, 'utf8')
+
+  const code =
+    "prefs = bpy.context.preferences.addons['cycles'].preferences\n" +
+    "prefs.compute_device_type = 'CUDA'\n" +
+    'result = {"device": prefs.compute_device_type}'
+  const value = await runPayload(python, workDir, code, {})
+  assert.equal(value.status, 'ok')
+  assert.equal(value.result.device, 'CUDA', 'user code still saw its own value')
+  assert.ok(
+    Array.isArray(value.guard.preferencesChanged) && value.guard.preferencesChanged.includes('cycles.compute_device_type'),
+    `expected the restore report, got ${JSON.stringify(value.guard.preferencesChanged)}`,
+  )
+  const blocked = Array.isArray(value.guard.blocked)
+    ? /** @type {Array<{ target?: string }>} */ (value.guard.blocked)
+    : []
+  assert.ok(
+    blocked.some((entry) => entry.target === 'cycles.compute_device_type'),
+    'expected the restore to be recorded as blocked',
+  )
 })

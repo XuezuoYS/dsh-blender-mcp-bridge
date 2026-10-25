@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { classifyTransportError, docsUrlFor, handshake, HandshakeError } from '../lib/handshake.js'
+import { classifyTransportError, docsUrlFor, HANDSHAKE_CODE, handshake, HandshakeError } from '../lib/handshake.js'
 import { ProtocolError } from '../lib/protocol.js'
 
 /**
@@ -43,6 +43,33 @@ function facts(overrides = {}) {
       samples: 64,
       fileFormat: 'PNG',
     },
+    performance: {
+      engine: 'CYCLES',
+      threads: { mode: 'AUTO', count: 0 },
+      colorManagement: {
+        displayDevice: 'sRGB',
+        viewTransform: 'AgX',
+        look: 'AgX - Medium High Contrast',
+        exposure: 0,
+        gamma: 1,
+      },
+      cycles: {
+        deviceType: 'OPTIX',
+        deviceCount: 9,
+        devices: [
+          { name: 'NVIDIA GeForce RTX 4090', type: 'OPTIX', use: true },
+          { name: 'AMD Ryzen 9 7950X', type: 'CPU', use: false },
+        ],
+        devicesTruncated: true,
+        samples: 128,
+        previewSamples: 8,
+        adaptiveSampling: true,
+        adaptiveThreshold: 0.01,
+        denoising: true,
+        denoiser: 'OPENIMAGEDENOISE',
+      },
+      eevee: { renderSamples: 64, viewportSamples: 16 },
+    },
     ...overrides,
   }
 }
@@ -57,6 +84,69 @@ test('handshake normalizes facts and builds the manual URL', async () => {
   assert.equal(info.renderSettings.engine, 'BLENDER_EEVEE')
   assert.equal(info.docs.manualEn, 'https://docs.blender.org/manual/en/5.2/')
   assert.equal(docsUrlFor('5.2'), 'https://docs.blender.org/manual/en/5.2/')
+})
+
+test('handshake normalizes the read-only performance block', async () => {
+  const info = await handshake({ host: '127.0.0.1', port: 9876, send: sender({ status: 'ok', result: facts() }) })
+  assert.equal(info.performance.engine, 'CYCLES')
+  assert.equal(info.performance.threads.mode, 'AUTO')
+  assert.equal(info.performance.colorManagement?.viewTransform, 'AgX')
+  assert.equal(info.performance.colorManagement?.exposure, 0)
+  assert.equal(info.performance.cycles?.deviceType, 'OPTIX')
+  assert.equal(info.performance.cycles?.deviceCount, 9)
+  assert.equal(info.performance.cycles?.devices.length, 2)
+  assert.equal(info.performance.cycles?.devices[0]?.use, true)
+  assert.equal(info.performance.cycles?.samples, 128)
+  assert.equal(info.performance.cycles?.adaptiveThreshold, 0.01)
+  assert.equal(info.performance.cycles?.denoiser, 'OPENIMAGEDENOISE')
+  assert.equal(info.performance.eevee?.viewportSamples, 16)
+  assert.match(HANDSHAKE_CODE, /_dsh_performance\(\)/)
+  assert.match(HANDSHAKE_CODE, /compute_device_type/)
+})
+
+test('a reply without performance still yields safe defaults', async () => {
+  const bare = facts()
+  delete bare.performance
+  const info = await handshake({ host: '127.0.0.1', port: 9876, send: sender({ status: 'ok', result: bare }) })
+  assert.equal(info.performance.engine, '')
+  assert.equal(info.performance.cycles, null)
+  assert.equal(info.performance.eevee, null)
+  assert.equal(info.performance.colorManagement, null)
+  assert.equal(info.performance.threads.count, 0)
+  assert.deepEqual(info.performance.threads.mode, '')
+})
+
+test('device rows are capped and malformed rows are dropped', async () => {
+  const devices = Array.from({ length: 12 }, (_, index) => ({ name: `Device ${String(index)}`, type: 'CUDA', use: false }))
+  const info = await handshake({
+    host: '127.0.0.1',
+    port: 9876,
+    send: sender({
+      status: 'ok',
+      result: facts({
+        performance: {
+          engine: 'CYCLES',
+          threads: { mode: 'AUTO', count: 0 },
+          colorManagement: null,
+          cycles: {
+            deviceType: 'CUDA',
+            deviceCount: 12,
+            devices: [...devices.slice(0, 10), 'junk', null],
+            devicesTruncated: true,
+            samples: 32,
+            previewSamples: 4,
+            adaptiveSampling: false,
+            adaptiveThreshold: 0,
+            denoising: false,
+            denoiser: '',
+          },
+          eevee: null,
+        },
+      }),
+    }),
+  })
+  assert.equal(info.performance.cycles?.devices.length, 8)
+  assert.equal(info.performance.cycles?.devices[0]?.name, 'Device 0')
 })
 
 test('older Blender versions are refused', async () => {
