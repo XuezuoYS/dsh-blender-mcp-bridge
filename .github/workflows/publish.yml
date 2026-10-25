@@ -6,16 +6,16 @@
 #   2. On npmjs.com -> the package -> Settings -> Trusted publishing, add
 #      GitHub Actions with owner XuezuoYS, repository dsh-blender-mcp-bridge,
 #      workflow filename publish.yml, and allow "npm publish".
-#   3. Create the annotated tag locally, then push the tag and the release
-#      branch:
-#        git tag -a v0.1.1 -m "v0.1.1"
-#        git push origin v0.1.1
-#        git push origin release
-#   4. The workflow publishes the version in package.json and creates a GitHub
-#      release on that tag (title and tag vX.Y.Z, body "无更新日志").
+#   3. Bump the version in package.json, then tag that commit and push the tag
+#      together with the release branch:
+#        git tag v1.2.3
+#        git push origin master:release --tags
+#   4. The workflow publishes the version in package.json (the tag must point
+#      at the pushed commit) and creates a GitHub release on that tag
+#      (title and tag vX.Y.Z, body "无更新日志").
 #
-# A release branch push without an annotated vX.Y.Z tag on the same commit
-# only runs the lightweight detect job; publish and release are skipped.
+# A release branch push without a vX.Y.Z tag on the same commit only runs the
+# lightweight detect job; publish and release are skipped.
 #
 # npm requires CLI 11.5.1+ for OIDC auth; Node 24 on GitHub-hosted runners
 # already ships a compatible npm.
@@ -54,14 +54,15 @@ jobs:
         run: |
           version="$(node -p 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
           tag="v$version"
+          git fetch --tags --force --quiet origin
           type="$(git cat-file -t "refs/tags/$tag" 2>/dev/null || true)"
           commit="$(git rev-parse "$tag^{commit}" 2>/dev/null || true)"
-          if [ "$type" = "tag" ] && [ "$commit" = "$GITHUB_SHA" ]; then
+          if [ -n "$commit" ] && [ "$commit" = "$GITHUB_SHA" ]; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
-            echo "found annotated tag $tag on $GITHUB_SHA"
+            echo "found tag $tag ($type) on $GITHUB_SHA"
           else
             echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "::notice::no annotated tag $tag on $GITHUB_SHA (type=${type:-missing}, tag_commit=${commit:-none}); skipping npm publish and GitHub release"
+            echo "::notice::no tag $tag on $GITHUB_SHA (type=${type:-missing}, tag_commit=${commit:-none}); skipping npm publish and GitHub release"
           fi
 
   publish:
