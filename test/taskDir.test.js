@@ -31,10 +31,13 @@ test('slugifyTaskName keeps CJK and strips separators', () => {
 })
 
 test('resolveTaskRoot follows taskRoot > mode > blend file > workspace', () => {
-  const workspace = path.resolve('C:/work/session')
-  assert.equal(resolveTaskRoot({ filePath: '', workspaceDir: workspace, taskRoot: 'C:/fixed' }).root, path.resolve('C:/fixed'))
-  assert.equal(resolveTaskRoot({ filePath: 'C:/proj/a.blend', workspaceDir: workspace, taskRootMode: 'workspace' }).root, workspace)
-  assert.equal(resolveTaskRoot({ filePath: 'C:/proj/a.blend', workspaceDir: workspace }).root, path.dirname(path.resolve('C:/proj/a.blend')))
+  const root = path.parse(process.cwd()).root
+  const workspace = path.join(root, 'work', 'session')
+  const fixedRoot = path.join(root, 'fixed')
+  const blendFile = path.join(root, 'proj', 'a.blend')
+  assert.equal(resolveTaskRoot({ filePath: '', workspaceDir: workspace, taskRoot: fixedRoot }).root, fixedRoot)
+  assert.equal(resolveTaskRoot({ filePath: blendFile, workspaceDir: workspace, taskRootMode: 'workspace' }).root, workspace)
+  assert.equal(resolveTaskRoot({ filePath: blendFile, workspaceDir: workspace }).root, path.dirname(blendFile))
   assert.equal(resolveTaskRoot({ filePath: '', workspaceDir: workspace }).root, workspace)
 })
 
@@ -159,9 +162,10 @@ test('isInsideTask resolves a directory link before deciding', async (t) => {
 })
 
 test('isInsideTask stops at the directory boundary', () => {
-  const taskDir = path.resolve('C:/proj/.dsh-blender-lamp')
+  const root = path.parse(process.cwd()).root
+  const taskDir = path.join(root, 'proj', '.dsh-blender-lamp')
   assert.equal(isInsideTask(path.join(taskDir, 'snapshots', '1-001.blend'), taskDir), true)
   assert.equal(isInsideTask(taskDir, taskDir), true)
-  assert.equal(isInsideTask(path.resolve('C:/proj/other.blend'), taskDir), false)
+  assert.equal(isInsideTask(path.join(root, 'proj', 'other.blend'), taskDir), false)
   assert.equal(isInsideTask(path.join(taskDir, '..', 'other.blend'), taskDir), false)
 })
