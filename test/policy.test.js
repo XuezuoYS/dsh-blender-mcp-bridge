@@ -65,3 +65,30 @@ test('dynamic bypasses are warned about, not claimed as blocked', () => {
   assert.equal(result.blocks.length, 0)
   assert.ok(result.warnings.some((warning) => warning.includes('ctypes')))
 })
+
+test('script warnings carry the source label and merge repeated lines', () => {
+  const source = 'import ctypes\nvalue = 1\nimport ctypes\nimport ctypes'
+  const result = scanRequest(source, TASK_DIR, 'script scripts/make.py')
+  assert.equal(result.warnings.length, 1)
+  assert.equal(result.warnings[0], 'script scripts/make.py lines 1, 3, 4: ctypes can bypass the runtime guard')
+})
+
+test('a single warning keeps the original line format', () => {
+  const result = scanRequest('import subprocess', TASK_DIR)
+  assert.equal(result.warnings[0], 'line 1: subprocess is not covered by the runtime guard')
+})
+
+test('long warning line lists are capped with a count', () => {
+  const source = Array.from({ length: 9 }, () => 'import ctypes').join('\n')
+  const result = scanRequest(source, TASK_DIR)
+  assert.equal(result.warnings.length, 1)
+  assert.match(result.warnings[0], /^lines 1, 2, 3, 4, 5, 6, \+3 more: ctypes/)
+})
+
+test('running code read from a file points at scriptPath', () => {
+  const result = scanRequest('exec(open("scripts/make.py").read())', TASK_DIR)
+  const text = result.warnings.join('\n')
+  assert.match(text, /not covered by this static scan/)
+  assert.match(text, /scriptPath/)
+  assert.doesNotMatch(text, /exec\(\) can build code/)
+})

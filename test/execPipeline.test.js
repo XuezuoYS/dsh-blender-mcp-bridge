@@ -6,7 +6,9 @@
  */
 
 import assert from 'node:assert/strict'
+import { writeFileSync } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -16,6 +18,18 @@ import { SendGateError } from '../lib/sendGate.js'
 import { createSnapshotTracker } from '../lib/snapshotPolicy.js'
 import { makeTools } from '../lib/tools.js'
 import { createTestHelperEnv } from './support/testPython.js'
+
+/** Payload marker the guard writes for user code; also covers script mode. */
+const USER_CODE_MARKER = /<dsh-(?:user-code|script:[^>]*)>/
+
+/**
+ * Session context every tool call uses in these tests.
+ *
+ * @returns {{ agent: { session: { id: string } } }} fake execution context
+ */
+function execContext() {
+  return { agent: { session: { id: 's1' } } }
+}
 
 /** @typedef {{ name: string, execute: (args: any, exec: any) => Promise<any>, output?: { render: (args: any, value: any) => any[] } }} ToolLike */
 
@@ -99,6 +113,7 @@ function pngStub(width, height) {
  * @param {boolean} [setup.probeUnreachable] - make the liveness probe fail to connect
  * @param {number} [setup.initialPushes] - undo steps already pushed this session
  * @param {boolean} [setup.busyGate] - make the read-slot gate reject with a busy error
+ * @param {boolean} [setup.storeCode] - store the executed code in the audit log (default true)
  * @returns {{ tools: ToolLike[], sent: string[], sentOptions: Record<string, unknown>[], snapshotFiles: string[], inspectParams: Record<string, unknown>[], slotCalls: () => number, pushes: () => number }} bridge pieces
  */
 function makeBridge(setup) {
@@ -125,7 +140,7 @@ function makeBridge(setup) {
       if (setup.probeUnreachable === true) throw new ProtocolError('connect-refused', 'probe refused')
       return { response: { status: 'ok', result: { ping: true } } }
     }
-    if (setup.timeoutOnExec === true && code.includes('<dsh-user-code>')) {
+    if (setup.timeoutOnExec === true && USER_CODE_MARKER.test(code)) {
       throw new ProtocolError('response-timeout', 'exec timed out')
     }
     if (setup.noBlender === true) throw new Error('transport should not be used')
@@ -136,7 +151,7 @@ function makeBridge(setup) {
       const names = setup.nextObjectNames ? setup.nextObjectNames() : ['Cube']
       return { response: { status: 'ok', result: { names, total: names.length } } }
     }
-    if (code.includes('<dsh-user-code>')) {
+    if (USER_CODE_MARKER.test(code)) {
       const inner = setup.execResult
         ? setup.execResult({})
         : {
@@ -226,7 +241,7 @@ function makeBridge(setup) {
       timeoutMs: 1000,
     },
     guard: { enabled: true },
-    audit: { enabled: true, storeCode: true },
+    audit: { enabled: true, storeCode: setup.storeCode !== false },
     taskRoot: '',
     taskRootMode: 'blendFile',
     send,
@@ -315,6 +330,164 @@ test('L1 refusal never sends the user code to Blender', async () => {
   assert.equal(sent.some((code) => code.includes('<dsh-user-code>')), false)
   const auditLines = (await readFile(path.join(blendDir, '.dsh-blender-lamp', 'audit.jsonl'), 'utf8')).trim().split('\n')
   assert.equal(JSON.parse(auditLines[0]).status, 'blocked')
+})
+
+test('L1 warnings ride along with a successful exec and reach the audit log', async () => {
+  const { blendDir, blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  const value = await execTool.execute({ code: 'import ctypes\nresult = {"ok": true}', task: 'lamp' }, execContext())
+
+  assert.equal(value.status, 'ok')
+  const warnings = /** @type {string[]} */ (value.warnings)
+  assert.ok(warnings.some((warning) => warning.includes('ctypes')))
+  assert.equal(value.policyWarnings.length, 1)
+  assert.match(value.policyWarnings[0], /^line 1: ctypes/)
+  assert.ok(sent.some((code) => USER_CODE_MARKER.test(code)), 'the call must still run')
+  const text = String(execTool.output?.render({}, value)[0].text)
+  assert.ok(text.includes('Warning: line 1: ctypes'))
+  const auditLines = (await readFile(path.join(blendDir, '.dsh-blender-lamp', 'audit.jsonl'), 'utf8')).trim().split('\n')
+  const audit = JSON.parse(auditLines[0])
+  assert.equal(audit.status, 'ok')
+  assert.deepEqual(audit.policyWarnings, value.policyWarnings)
+})
+
+test('scriptPath runs a task-directory script and records its hash', async () => {
+  const { blendDir, blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  // The first call claims `.dsh-blender-lamp` and writes its owner marker.
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, execContext())
+  const taskDir = path.join(blendDir, '.dsh-blender-lamp')
+  await mkdir(path.join(taskDir, 'scripts'), { recursive: true })
+  const source = 'marker = "script-ran"\nresult = {"marker": marker}\n'
+  await writeFile(path.join(taskDir, 'scripts', 'make.py'), source)
+
+  const value = await execTool.execute({ scriptPath: 'scripts/make.py', task: 'lamp' }, execContext())
+
+  assert.equal(value.status, 'ok')
+  const sha256 = createHash('sha256').update(source).digest('hex')
+  assert.deepEqual(value.script, { path: 'scripts/make.py', sha256, bytes: Buffer.byteLength(source) })
+  assert.ok(sent.some((code) => code.includes('script-ran') && code.includes('<dsh-script:scripts/make.py>')))
+  const text = String(execTool.output?.render({}, value)[0].text)
+  assert.ok(text.includes('Script: scripts/make.py'))
+  const auditLines = (await readFile(path.join(taskDir, 'audit.jsonl'), 'utf8')).trim().split('\n')
+  const audit = JSON.parse(auditLines[auditLines.length - 1])
+  assert.equal(audit.status, 'ok')
+  assert.equal(audit.scriptPath, 'scripts/make.py')
+  assert.equal(audit.scriptSha256, sha256)
+  assert.equal(audit.codeSha256, sha256)
+})
+
+test('the script hash is audited even when storeCode is off', async () => {
+  const { blendDir, blendPath, root } = await makeProject()
+  const { tools } = makeBridge({ blendPath, workspaceDir: root, storeCode: false })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, execContext())
+  const taskDir = path.join(blendDir, '.dsh-blender-lamp')
+  const source = 'result = {"ran": true}\n'
+  await writeFile(path.join(taskDir, 'make.py'), source)
+
+  const value = await execTool.execute({ scriptPath: 'make.py', task: 'lamp' }, execContext())
+  assert.equal(value.status, 'ok')
+  const auditLines = (await readFile(path.join(taskDir, 'audit.jsonl'), 'utf8')).trim().split('\n')
+  const audit = JSON.parse(auditLines[auditLines.length - 1])
+  assert.equal(audit.scriptPath, 'make.py')
+  assert.equal(audit.scriptSha256, createHash('sha256').update(source).digest('hex'))
+  assert.equal(audit.code, undefined)
+})
+
+test('a banned call inside a script is blocked before anything is sent', async () => {
+  const { blendDir, blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, execContext())
+  const taskDir = path.join(blendDir, '.dsh-blender-lamp')
+  await writeFile(path.join(taskDir, 'bad.py'), 'bpy.ops.wm.save_mainfile()\n')
+  const payloadsBefore = sent.filter((code) => USER_CODE_MARKER.test(code)).length
+
+  const value = await execTool.execute({ scriptPath: 'bad.py', task: 'lamp' }, execContext())
+
+  assert.equal(value.status, 'blocked')
+  assert.equal(value.blocked[0].rule, 'blocked-operator')
+  assert.equal(value.script.path, 'bad.py')
+  assert.equal(sent.filter((code) => USER_CODE_MARKER.test(code)).length, payloadsBefore, 'no payload may be sent')
+  const auditLines = (await readFile(path.join(taskDir, 'audit.jsonl'), 'utf8')).trim().split('\n')
+  const audit = JSON.parse(auditLines[auditLines.length - 1])
+  assert.equal(audit.status, 'blocked')
+  assert.equal(audit.scriptPath, 'bad.py')
+})
+
+test('a script that changed after the scan is refused without running', async () => {
+  const { blendDir, blendPath, root } = await makeProject()
+  const taskDir = path.join(blendDir, '.dsh-blender-lamp')
+  const scriptPath = path.join(taskDir, 'make.py')
+  let changedSource = ''
+  const { tools, sent } = makeBridge({
+    blendPath,
+    workspaceDir: root,
+    nextObjectNames: () => {
+      if (changedSource !== '') writeFileSync(scriptPath, changedSource, 'utf8')
+      return ['Cube']
+    },
+  })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, execContext())
+  await writeFile(scriptPath, 'result = {"version": 1}\n')
+  const payloadsBefore = sent.filter((code) => USER_CODE_MARKER.test(code)).length
+  changedSource = 'result = {"version": 2}\n'
+
+  const value = await execTool.execute({ scriptPath: 'make.py', task: 'lamp' }, execContext())
+
+  assert.equal(value.status, 'refused')
+  assert.equal(value.error.kind, 'script-changed')
+  assert.equal(sent.filter((code) => USER_CODE_MARKER.test(code)).length, payloadsBefore, 'no payload may be sent')
+  const auditLines = (await readFile(path.join(taskDir, 'audit.jsonl'), 'utf8')).trim().split('\n')
+  assert.equal(JSON.parse(auditLines[auditLines.length - 1]).status, 'refused')
+})
+
+test('scriptPath rejects bad paths before touching Blender', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  await execTool.execute({ code: 'result = {}', task: 'lamp' }, execContext())
+  const payloadsBefore = sent.filter((code) => USER_CODE_MARKER.test(code)).length
+  for (const badPath of ['../outside.py', 'notes.txt', 'missing.py']) {
+    const value = await execTool.execute({ scriptPath: badPath, task: 'lamp' }, execContext())
+    assert.equal(value.status, 'error', badPath)
+    assert.equal(value.error.kind, 'invalid-script', badPath)
+  }
+  assert.equal(sent.filter((code) => USER_CODE_MARKER.test(code)).length, payloadsBefore)
+})
+
+test('code, batch and scriptPath cannot be combined', async () => {
+  const { blendPath, root } = await makeProject()
+  const { tools, sent } = makeBridge({ blendPath, workspaceDir: root })
+  const execTool = tools.find((tool) => tool.name === 'blender_mcp_exec')
+  assert.ok(execTool)
+
+  for (const args of [
+    { code: 'result = {}', scriptPath: 'make.py', task: 'lamp' },
+    { batch: ['result = {}'], scriptPath: 'make.py', task: 'lamp' },
+    { task: 'lamp' },
+  ]) {
+    const value = await execTool.execute(args, execContext())
+    assert.equal(value.status, 'error')
+    assert.equal(value.error.kind, 'invalid-arguments')
+  }
+  assert.equal(sent.length, 0)
 })
 
 test('a guard refusal maps to blocked with a suggested path', async () => {

@@ -30,6 +30,10 @@ guard, not a sandbox.
    the plugin snapshots before the call according to the snapshot policy
    (default `adaptive`: the first write of a turn, every 10 writes, and
    delete-like calls), then pushes one undo step; group snippets with `batch`.
+   Long scripts can live in the task directory and run with `scriptPath`: the
+   plugin scans the file, records its SHA-256, and refuses the call if the file
+   changed after the scan. Static-scan and runtime-guard remarks come back in
+   `warnings`; they never refuse a call.
    Inspection code uses `readOnly: true`: no snapshot, no object diff, no undo
    step — unless the call actually changed the scene, then one step is pushed
    anyway. Code that pushes its own undo steps can add more. Tell the user

@@ -87,3 +87,13 @@ test('the default payload carries no fingerprint code', () => {
   assert.doesNotMatch(code, /_dsh_fingerprint/)
   assert.match(code, /bpy\.ops\.ed\.undo_push/)
 })
+
+test('a script name replaces the compile() file name in tracebacks', () => {
+  const code = wrapWithGuard('result = {}', {
+    taskRoot: 'C:/proj/.dsh-blender-lamp',
+    undoMessage: 'dsh-blender: lamp',
+    codeName: '<dsh-script:scripts/make.py>',
+  })
+  assert.match(code, /<dsh-script:scripts\/make\.py>/)
+  assert.doesNotMatch(code, /<dsh-user-code>/)
+})
