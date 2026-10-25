@@ -1,0 +1,67 @@
+# Publish the package to npm from GitHub Actions.
+#
+# Trusted publishing is the recommended path and needs no long-lived token:
+#   1. Publish the first version once from a local machine (`npm login`, then
+#      `npm publish`) so the package exists on npmjs.com.
+#   2. On npmjs.com -> the package -> Settings -> Trusted publishing, add
+#      GitHub Actions with owner XuezuoYS, repository dsh-blender-mcp-bridge,
+#      workflow filename publish.yml, and allow "npm publish".
+#   3. Push to the release branch (or merge into it). This workflow
+#      type-checks, tests and publishes the version in package.json;
+#      provenance is generated automatically.
+#
+# Bump the version in package.json before pushing to release; npm rejects a
+# version that is already published.
+#
+# npm requires CLI 11.5.1+ for OIDC auth; Node 24 on GitHub-hosted runners
+# already ships a compatible npm.
+#
+# For a token-based first publish, uncomment the NODE_AUTH_TOKEN block on the
+# Publish step and add an npm automation token as the NPM_TOKEN repository
+# secret.
+
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - release
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Publish
+        run: npm publish
+        # Token fallback for the first publish:
+        # env:
+        #   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
