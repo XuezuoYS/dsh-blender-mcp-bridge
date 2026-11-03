@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     const ENV_ENDPOINT = '/api/blender-bridge/helper-env'
     /** Host route for the plugin's own settings files. */
     const SETTINGS_ENDPOINT = '/api/blender-bridge/settings'
+    /** Project repository; the hero's star line links here. */
+    const GITHUB_URL = 'https://github.com/XuezuoYS/dsh-blender-mcp-bridge'
     /** Display order for the four pinned packages. */
     const PACKAGE_ORDER = ['numpy', 'Pillow', 'opencv-python-headless', 'scipy']
 
@@ -29,6 +31,7 @@ window.__ModuleLoader__.load({
       navLabel: 'Blender MCP',
       tagline: '让 AI 在你打开的 Blender 会话里安全地工作',
       heroMeta: '保存到 DSH_HOME/dsh-blender-mcp-bridge/ 下的设置文件，立即生效',
+      heroStar: 'xuezuoys | GitHub 链接 | 求求 star 拜托了我什么都会做的！',
       badgeLive: '保存后即时生效',
       badgeCustom: '已自定义',
       factSave: '插件不会保存 .blend，也不会退出 Blender；改动可用 Ctrl+Z 逐步撤销。',
@@ -192,6 +195,7 @@ window.__ModuleLoader__.load({
       navLabel: 'Blender MCP',
       tagline: 'Let the model work safely in the Blender session you have open',
       heroMeta: 'Saved to the plugin config files under DSH_HOME/dsh-blender-mcp-bridge and applied immediately',
+      heroStar: 'xuezuoys | GitHub | Please star — I\'ll do anything!',
       badgeLive: 'Applies on save',
       badgeCustom: 'Customized',
       factSave: 'The plugin never saves the .blend and never quits Blender; undo with Ctrl+Z.',
@@ -407,6 +411,8 @@ window.__ModuleLoader__.load({
 .bb-title { margin: 0; font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: .01em; }
 .bb-tagline { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 19px; }
 .bb-meta { color: color-mix(in srgb, var(--dsw-alias-label-secondary) 52%, transparent); font-size: 11.5px; line-height: 16px; }
+.bb-star { display: inline-flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--dsw-alias-brand-primary); font-size: 12px; line-height: 17px; text-decoration: none; width: fit-content; }
+.bb-star:hover { text-decoration: underline; }
 .bb-badges { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .bb-pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 11px; white-space: nowrap; }
 .bb-pill[data-tone="success"] { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 32%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent); }
@@ -611,6 +617,16 @@ window.__ModuleLoader__.load({
     /** @returns {any} */
     function IconInfo() {
       return h(SvgIcon, null, h('circle', { cx: 12, cy: 12, r: 8 }), h('path', { d: 'M12 11v5' }), h('path', { d: 'M12 8v.1' }))
+    }
+    /** @returns {any} the GitHub mark, filled instead of stroked */
+    function IconGithub({ size = 13 }) {
+      return h(
+        'svg',
+        { viewBox: '0 0 24 24', width: size, height: size, fill: 'currentColor', 'aria-hidden': true, focusable: 'false' },
+        h('path', {
+          d: 'M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12',
+        }),
+      )
     }
 
     /** @param {any} group @returns {any} */
@@ -1557,6 +1573,12 @@ window.__ModuleLoader__.load({
             h('h3', { className: 'bb-title' }, t('title')),
             h('p', { className: 'bb-tagline' }, t('tagline')),
             h('span', { className: 'bb-meta' }, t('heroMeta')),
+            h(
+              'a',
+              { className: 'bb-star', href: GITHUB_URL, target: '_blank', rel: 'noreferrer' },
+              h(IconGithub, { size: 13 }),
+              t('heroStar'),
+            ),
           ),
           h(
             'div',
