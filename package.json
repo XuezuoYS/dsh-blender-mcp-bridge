@@ -9,6 +9,7 @@
     "model-context-protocol",
     "deepseek-harness",
     "dsh",
+    "dsh-plugin",
     "3d-modeling",
     "plugin"
   ],
